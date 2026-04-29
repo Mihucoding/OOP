@@ -1,0 +1,29 @@
+import math
+from logic.rune.rune_component import ModifierRune
+
+
+class SpiralModifier(ModifierRune):
+    """
+    Rune Xoắn Ốc — quay vận tốc đạn mỗi frame.
+    Stack: chọn 2 lần → ROTATE_SPEED nhân đôi.
+    """
+    ROTATE_SPEED = 180.0   # độ/giây
+
+    def __init__(self):
+        super().__init__()
+        self.stack = 1   # tăng khi player chọn lại
+
+    def on_update(self, bullet, dt: float) -> None:
+        # Mỗi frame: xoay vector (vx, vy) một góc nhỏ
+        # angle_rad = math.radians(ROTATE_SPEED * self.stack * dt)
+        # vx_new = vx*cos - vy*sin
+        # vy_new = vx*sin + vy*cos
+        # Cập nhật bullet.vx, bullet.vy
+        pass
+
+    def on_fire(self, bullet, context: dict) -> list:
+        return []
+
+    def get_display_name(self) -> str: return "Rune Xoắn Ốc"
+    def get_description(self) -> str: return "Đạn bay theo quỹ đạo xoắn ốc"
+    def get_color(self) -> tuple: return (200, 150, 255)

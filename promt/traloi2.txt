@@ -1,0 +1,8 @@
+Q8. 3 
+Q9. 1280 x 720
+Q10. To hơn + Nhiều máu + một số skill lạ hơn
+Q11. Sau vài (3-4 wave) wave đầu hay tầm 7 8'
+Q12. Có thể cộng dồn 
+Q13. TỐi đa 3 cấp 
+Hỏi thêm nếu cần , đề xuất hướng vừa sử dụng Claude + Gemini + API gemma để code tốn ít token hơn
+ 
