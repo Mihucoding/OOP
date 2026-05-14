@@ -35,7 +35,13 @@ class Player:
         # 2. self.x += direction.x * self.speed * dt
         # 3. self.y += direction.y * self.speed * dt
         # 4. Giảm fire_timer nếu > 0
-        pass
+        move_len = math.hypot(move_x, move_y)
+        if move_len > 0:
+            move_x /= move_len
+            move_y /= move_len
+        self.x += move_x * self.speed * dt
+        self.y += move_y * self.speed * dt
+        self.fire_timer = max(0.0, self.fire_timer - dt)
 
     def can_fire(self) -> bool:
         return self.fire_timer <= 0
@@ -45,12 +51,22 @@ class Player:
 
     def take_damage(self, amount: float) -> None:
         # Trừ HP, clamp về 0, set alive=False nếu hp<=0
-        pass
+        self.hp -= amount
+        if self.hp <= 0:
+            self.hp = 0
+            self.alive = False
 
     def add_xp(self, amount: int) -> bool:
         # Cộng XP, nếu đủ → level += 1, tính xp_to_next mới, trả về True
         # Công thức xp_to_next mới = int(xp_to_next * 1.4)
-        pass
+        self.xp += amount
+        leveled_up = False
+        while self.xp >= self.xp_to_next:
+            self.level += 1
+            self.xp -= self.xp_to_next
+            self.xp_to_next = int(self.xp_to_next * 1.4)
+            leveled_up = True
+        return leveled_up
 
     def get_hp_ratio(self) -> float:
         return self.hp / self.max_hp
