@@ -18,7 +18,15 @@ class Bullet:
         self.elapsed = 0.0
 
         # Tính vector vận tốc hướng về target (normalize rồi nhân speed)
-        # self.vx, self.vy = ...
+        dx   = target_x - float(x)
+        dy   = target_y - float(y)
+        dist = math.hypot(dx, dy)
+        if dist > 0:
+            self.vx = (dx / dist) * Bullet.BASE_SPEED
+            self.vy = (dy / dist) * Bullet.BASE_SPEED
+        else:
+            self.vx = Bullet.BASE_SPEED
+            self.vy = 0.0
 
         # State dùng bởi các Modifier
         self.spiral_angle = 0.0   # SpiralModifier xoay vận tốc mỗi frame
@@ -33,17 +41,27 @@ class Bullet:
         # 1. Gọi rune_tree.on_update(self, dt) nếu có
         # 2. Di chuyển: self.x += self.vx * dt, self.y += self.vy * dt
         # 3. Cộng elapsed, nếu >= LIFETIME thì self.alive = False
-        pass
+        if self.rune_tree:
+            self.rune_tree.on_update(self, dt)
+        self.x       += self.vx * dt
+        self.y       += self.vy * dt
+        self.elapsed += dt
+        if self.elapsed >= Bullet.LIFETIME:
+            self.alive = False
 
     def on_hit(self, enemy, context: dict) -> None:
         # 1. Reset bounce_redirect = False
         # 2. Gọi rune_tree.on_hit(self, enemy, context) nếu có
         # 3. Nếu bounce_redirect vẫn False → self.alive = False
-        pass
+        self.bounce_redirect = False
+        if self.rune_tree:
+            self.rune_tree.on_hit(self, enemy, context)
+        if not self.bounce_redirect:
+            self.alive = False
 
     def redirect(self, new_vx: float, new_vy: float) -> None:
         # BounceModifier gọi hàm này để đổi hướng đạn
-        # Set self.vx, self.vy mới
-        # Set self.bounce_redirect = True (giữ bullet sống)
-        # Reset self.elapsed = 0
-        pass
+        self.vx              = new_vx
+        self.vy              = new_vy
+        self.bounce_redirect = True  # giữ bullet sống sau on_hit
+        self.elapsed         = 0.0   # reset lifetime

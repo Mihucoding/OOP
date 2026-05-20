@@ -14,12 +14,14 @@ class SpiralModifier(ModifierRune):
         self.stack = 1   # tăng khi player chọn lại
 
     def on_update(self, bullet, dt: float) -> None:
-        # Mỗi frame: xoay vector (vx, vy) một góc nhỏ
-        # angle_rad = math.radians(ROTATE_SPEED * self.stack * dt)
-        # vx_new = vx*cos - vy*sin
-        # vy_new = vx*sin + vy*cos
-        # Cập nhật bullet.vx, bullet.vy
-        pass
+        # Xoay vector vận tốc một góc nhỏ mỗi frame
+        angle_rad = math.radians(self.ROTATE_SPEED * self.stack * dt)
+        cos_a     = math.cos(angle_rad)
+        sin_a     = math.sin(angle_rad)
+        vx_new    = bullet.vx * cos_a - bullet.vy * sin_a
+        vy_new    = bullet.vx * sin_a + bullet.vy * cos_a
+        bullet.vx = vx_new
+        bullet.vy = vy_new
 
     def on_fire(self, bullet, context: dict) -> list:
         return []

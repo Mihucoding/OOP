@@ -54,14 +54,14 @@ class Boss(Enemy):
         self.pending_summon = False   # WaveManager đọc cờ này
 
     def update(self, dt: float, player_x: float, player_y: float) -> None:
-        # 1. Cập nhật status_effects (giống Enemy)
-        slow_factor = 1.0
+        # 1. Cập nhật status_effects (xử lý slow, chill, stun như nhau qua slow_factor)
+        slow_factor    = 1.0
         active_effects = []
         for eff in self.status_effects:
             eff.update(self, dt)
             if not eff.is_expired():
                 active_effects.append(eff)
-                if eff.type == 'slow':
+                if eff.slow_factor < 1.0:
                     slow_factor = min(slow_factor, eff.slow_factor)
         self.status_effects = active_effects
 

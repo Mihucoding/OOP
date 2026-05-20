@@ -11,10 +11,12 @@ class PoisonRune(ElementRune):
     POISON_DURATION = 5.0
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
-        # Tạo StatusEffect loại 'poison'
-        # damage_per_sec = POISON_DAMAGE * bullet.element_stack
-        # duration = POISON_DURATION
-        pass
+        poison = StatusEffect(
+            effect_type='poison',
+            damage_per_sec=self.POISON_DAMAGE * bullet.element_stack,
+            duration=self.POISON_DURATION,
+        )
+        enemy.add_status(poison)
 
     def get_display_name(self) -> str: return "Rune Độc"
     def get_description(self) -> str:

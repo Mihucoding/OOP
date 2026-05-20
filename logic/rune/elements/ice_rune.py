@@ -11,10 +11,14 @@ class IceRune(ElementRune):
     SLOW_DURATION = 3.0
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
-        # Tạo StatusEffect loại 'slow'
-        # slow_factor = SLOW_FACTOR ** bullet.element_stack (stack mạnh hơn)
-        # duration = SLOW_DURATION
-        pass
+        # 'chill' hỗ trợ stacks: mỗi lần trúng thêm 1 stack, tối đa 5 stacks = đóng băng
+        chill = StatusEffect(
+            effect_type='chill',
+            damage_per_sec=0.0,
+            duration=self.SLOW_DURATION,
+            slow_factor=self.SLOW_FACTOR ** bullet.element_stack,
+        )
+        enemy.add_status(chill)
 
     def get_display_name(self) -> str: return "Rune Băng"
     def get_description(self) -> str:

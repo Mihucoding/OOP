@@ -1,18 +1,8 @@
 """
-RuneTree — Cây Rune kết hợp Element + Modifiers.
+RuneTree — Cây Rune kết hợp Elements + Modifiers cho 1 chiêu.
 
-Ví dụ song song (parallel):
-    tree.element = IceRune()
-    tree.add_modifier(SpiralModifier())   # root level
-    tree.add_modifier(BounceModifier())   # root level
-    → đạn xoắn ốc + đóng băng + nảy
-
-Ví dụ nối tiếp (serial):
-    spiral = SpiralModifier()
-    bounce = BounceModifier()
-    tree.add_modifier(spiral)
-    tree.add_modifier(bounce, parent=spiral)   # bounce là con của spiral
-    → spiral áp dụng trước, bounce là "con" của spiral
+Chiêu luôn có Base Spell (đạn thường), nên RuneTree không cần Element để bắn.
+Elements thêm hiệu ứng khi trúng; Modifiers thay đổi hành vi đạn.
 """
 from logic.rune.rune_component import RuneComponent, ElementRune, ModifierRune
 
@@ -20,29 +10,43 @@ from logic.rune.rune_component import RuneComponent, ElementRune, ModifierRune
 class RuneTree:
     """
     Container chứa toàn bộ Rune của 1 viên đạn.
-    - element: đúng 1 ElementRune (bắt buộc để bắn)
-    - modifiers: danh sách ModifierRune ở cấp gốc (song song nhau)
-    - MAX_DEPTH = 3: cây tối đa 3 cấp sâu
+    - elements : list[ElementRune] — nhiều nguyên tố cùng hoạt động
+    - modifiers: list[ModifierRune] — quỹ đạo / split / bounce
+    - MAX_DEPTH = 3
     """
 
     MAX_DEPTH = 3
 
-    def __init__(self, element: ElementRune = None):
-        self.element: ElementRune | None = element
+    def __init__(self):
+        self.elements:  list[ElementRune]  = []
         self.modifiers: list[ModifierRune] = []
 
-    def set_element(self, element: ElementRune) -> None:
-        self.element = element
+    # ── Backward-compat property ───────────────────────────────────────────────
+
+    @property
+    def element(self) -> ElementRune | None:
+        """Element đầu tiên trong cây, giữ lại để tương thích code cũ."""
+        return self.elements[0] if self.elements else None
+
+    # ── Thiết lập Elements ────────────────────────────────────────────────────
+
+    def set_element(self, elem: ElementRune) -> None:
+        """Thay thế toàn bộ danh sách Element bằng 1 Element."""
+        self.elements = [elem]
+
+    def add_element(self, elem: ElementRune) -> None:
+        """Thêm Element phụ vào danh sách."""
+        self.elements.append(elem)
+
+    def remove_element(self, elem: ElementRune) -> None:
+        if elem in self.elements:
+            self.elements.remove(elem)
+
+    # ── Thiết lập Modifiers ───────────────────────────────────────────────────
 
     def add_modifier(self, modifier: ModifierRune,
                      parent: ModifierRune = None,
                      depth: int = 1) -> bool:
-        """
-        Thêm modifier vào cây.
-        - parent=None  → thêm vào gốc (song song)
-        - parent=X     → thêm làm con của X (nối tiếp)
-        Trả về False nếu vượt MAX_DEPTH.
-        """
         if depth > self.MAX_DEPTH:
             return False
         if parent is None:
@@ -51,10 +55,10 @@ class RuneTree:
             parent.add_child(modifier)
         return True
 
-    # ── Áp dụng cây ──────────────────────────────────────────────
+    # ── Áp dụng cây ──────────────────────────────────────────────────────────
 
     def on_fire(self, bullet, context: dict) -> list:
-        """Gọi khi đạn bắn. Trả về list đạn phụ (Split tạo thêm)."""
+        """Gọi khi đạn bắn. Trả về list đạn phụ (SplitModifier tạo thêm)."""
         new_bullets: list = []
         for mod in self.modifiers:
             self._traverse_fire(mod, bullet, context, new_bullets, depth=1)
@@ -66,15 +70,24 @@ class RuneTree:
             self._traverse_update(mod, bullet, dt, depth=1)
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
-        """Gọi khi đạn trúng quái — áp dụng hiệu ứng Element trước, rồi Modifier."""
-        if self.element:
-            self.element.on_hit(bullet, enemy, context)
+        """
+        Gọi khi đạn trúng quái.
+        Áp dụng TẤT CẢ Elements (mỗi cái dùng element_stack của riêng nó),
+        sau đó áp dụng Modifiers.
+        """
+        original_stack = bullet.element_stack
+        for elem in self.elements:
+            # Tạm đặt element_stack theo từng element (hỗ trợ stacking riêng)
+            bullet.element_stack = getattr(elem, 'element_stack', 1)
+            elem.on_hit(bullet, enemy, context)
+        bullet.element_stack = original_stack  # phục hồi
+
         for mod in self.modifiers:
             self._traverse_hit(mod, bullet, enemy, context, depth=1)
 
-    # ── Duyệt cây đệ quy ─────────────────────────────────────────
+    # ── Duyệt cây đệ quy ─────────────────────────────────────────────────────
 
-    def _traverse_fire(self, node: RuneComponent, bullet, context, result, depth):
+    def _traverse_fire(self, node, bullet, context, result, depth):
         if depth > self.MAX_DEPTH:
             return
         new = node.on_fire(bullet, context)
@@ -83,27 +96,25 @@ class RuneTree:
         for child in node.get_children():
             self._traverse_fire(child, bullet, context, result, depth + 1)
 
-    def _traverse_update(self, node: RuneComponent, bullet, dt, depth):
+    def _traverse_update(self, node, bullet, dt, depth):
         if depth > self.MAX_DEPTH:
             return
         node.on_update(bullet, dt)
         for child in node.get_children():
             self._traverse_update(child, bullet, dt, depth + 1)
 
-    def _traverse_hit(self, node: RuneComponent, bullet, enemy, context, depth):
+    def _traverse_hit(self, node, bullet, enemy, context, depth):
         if depth > self.MAX_DEPTH:
             return
         node.on_hit(bullet, enemy, context)
         for child in node.get_children():
             self._traverse_hit(child, bullet, enemy, context, depth + 1)
 
-    # ── Tiện ích ─────────────────────────────────────────────────
+    # ── Tiện ích ─────────────────────────────────────────────────────────────
 
     def get_all_runes(self) -> list:
-        """Trả về toàn bộ Rune trong cây (dùng cho UI hiển thị)."""
-        runes = []
-        if self.element:
-            runes.append(self.element)
+        """Trả về toàn bộ Rune trong cây (dùng cho HUD / Builder)."""
+        runes = list(self.elements)
         for mod in self.modifiers:
             self._collect(mod, runes)
         return runes
@@ -114,14 +125,14 @@ class RuneTree:
             self._collect(child, out)
 
     def is_ready(self) -> bool:
-        """Cây hợp lệ khi có ít nhất 1 Element."""
-        return self.element is not None
+        """Base Spell luôn bắn được, kể cả khi chưa gắn rune."""
+        return True
 
     def describe(self) -> str:
-        """Mô tả ngắn gọn (dùng cho debug)."""
-        parts = []
-        if self.element:
-            parts.append(f"[{self.element.get_display_name()}]")
-        for mod in self.modifiers:
-            parts.append(f"→{mod.get_display_name()}")
-        return " ".join(parts) if parts else "Chưa có Rune"
+        """Mô tả ngắn gọn (dùng cho debug và Builder hint)."""
+        elem_str = " | ".join(
+            f"[{e.get_display_name()}]" for e in self.elements)
+        mod_str  = " ".join(
+            f"→{m.get_display_name()}" for m in self.modifiers)
+        parts = [p for p in (elem_str, mod_str) if p]
+        return " ".join(parts) if parts else "Đạn thường"
