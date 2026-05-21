@@ -11,6 +11,7 @@ class IceRune(ElementRune):
     SLOW_DURATION = 3.0
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
+<<<<<<< HEAD
         # 'chill' hỗ trợ stacks: mỗi lần trúng thêm 1 stack, tối đa 5 stacks = đóng băng
         chill = StatusEffect(
             effect_type='chill',
@@ -23,4 +24,14 @@ class IceRune(ElementRune):
     def get_display_name(self) -> str: return "Ice Rune"
     def get_description(self) -> str:
         return f"Slows enemies by {int((1-self.SLOW_FACTOR)*100)}% for {self.SLOW_DURATION}s"
+=======
+        # Tạo StatusEffect loại 'slow'
+        # slow_factor = SLOW_FACTOR ** bullet.element_stack (stack mạnh hơn)
+        # duration = SLOW_DURATION
+        pass
+
+    def get_display_name(self) -> str: return "Rune Băng"
+    def get_description(self) -> str:
+        return f"Làm chậm quái {int((1-self.SLOW_FACTOR)*100)}% trong {self.SLOW_DURATION}s"
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
     def get_color(self) -> tuple: return (100, 200, 255)

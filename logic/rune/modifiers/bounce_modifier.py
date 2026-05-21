@@ -15,6 +15,7 @@ class BounceModifier(ModifierRune):
         self.stack = 1
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
+<<<<<<< HEAD
         bounce_max = self.MAX_BOUNCE * self.stack
         if bullet.bounce_count >= bounce_max:
             return
@@ -40,6 +41,15 @@ class BounceModifier(ModifierRune):
                     (dy / dist) * self.BOUNCE_SPEED,
                 )
                 bullet.bounce_count += 1
+=======
+        # 1. Tính bounce_max = MAX_BOUNCE * self.stack
+        # 2. Nếu bullet.bounce_count < bounce_max:
+        #    a. Tìm quái gần nhất trong context['enemies'] (trừ enemy vừa trúng)
+        #    b. Nếu tìm thấy: bullet.redirect(vx, vy về quái đó)
+        #       bullet.bounce_count += 1
+        #    c. Nếu không tìm thấy: không làm gì (bullet tự chết)
+        pass
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def on_update(self, bullet, dt: float) -> None:
         # Sau khi redirect, bullet.bounce_redirect = True → game loop không kill
@@ -49,6 +59,11 @@ class BounceModifier(ModifierRune):
     def on_fire(self, bullet, context: dict) -> list:
         return []
 
+<<<<<<< HEAD
     def get_display_name(self) -> str: return "Bounce Rune"
     def get_description(self) -> str: return f"Bullets bounce up to {self.MAX_BOUNCE} times"
+=======
+    def get_display_name(self) -> str: return "Rune Nảy"
+    def get_description(self) -> str: return f"Đạn nảy tối đa {self.MAX_BOUNCE} lần"
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
     def get_color(self) -> tuple: return (255, 220, 50)

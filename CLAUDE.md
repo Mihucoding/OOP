@@ -1,15 +1,26 @@
 # CLAUDE.md — Đồ Án Roguelike Rune Crafting
 
+<<<<<<< HEAD
 > **Cập nhật lần cuối**: 2026-05-20
+=======
+> **Tự động cập nhật**: Cuối mỗi prompt, Claude PHẢI cập nhật file này.
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
 ---
 
 ## Dự án
 
+<<<<<<< HEAD
 **Tên**: 2D Top-down Survival Roguelike — Rune Crafting System  
 **Ngôn ngữ**: Python 3.11 + Pygame-CE  
 **Resolution**: 1280 × 720  
 **Trình độ**: Sinh viên năm 1 — comment tiếng Việt, code rõ ràng  
+=======
+**Tên**: 2D Top-down Survival Roguelike — Rune Crafting System
+**Ngôn ngữ**: Python + Pygame-CE
+**Resolution**: 1280 × 720
+**Trình độ**: Sinh viên năm 1 — comment tiếng Việt, code rõ ràng
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 **Mục tiêu OOP**: Composite Pattern · Open/Closed · Composition over Inheritance
 
 ---
@@ -20,8 +31,12 @@
 2. `ui/` CÓ THỂ import từ `logic/`
 3. Mỗi Rune = 1 file riêng trong `elements/` hoặc `modifiers/`
 4. `Bullet` nhận `RuneTree` lúc runtime — không subclass theo loại đạn
+<<<<<<< HEAD
 5. Thêm Rune mới = thêm class mới, **không sửa** `RuneComponent`, `Bullet`
 6. `RuneTree.on_hit` set tạm `bullet.element_stack` per element → mỗi element stack độc lập
+=======
+5. Thêm Rune mới = thêm class mới, **không sửa** `RuneComponent`, `RuneTree`, `Bullet`
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
 ---
 
@@ -29,6 +44,7 @@
 
 | Mục | Giá trị |
 |-----|---------|
+<<<<<<< HEAD
 | Element Rune | 4: FireRune, IceRune, LightningRune, WindRune |
 | Chiêu riêng | 3: Chiêu 1, Chiêu 2, Chiêu 3 |
 | Modifier Rune | 4: SpiralModifier, BounceModifier, SplitModifier, HasteRune |
@@ -47,6 +63,17 @@
 | StatusEffect | burn/chill (stacks) + slow + stun + poison |
 | Enemy types | Enemy + RangedEnemy (30% từ wave 2) + Boss |
 | Map | Vô hạn, player center, camera scroll |
+=======
+| Rune Element | 3: FireRune, IceRune, PoisonRune |
+| Rune Modifier | 3: SpiralModifier, BounceModifier, SplitModifier |
+| Rune tree depth | Tối đa 3 cấp |
+| Rune stack | Có — cùng Rune chọn nhiều lần được |
+| Lựa chọn lên cấp | 3 Rune ngẫu nhiên |
+| Wave | Theo thời gian + random nhỏ |
+| Boss trigger | Wave 3–4 HOẶC 7–8 phút |
+| Boss skills | Charge, AoE Slam, Summon |
+| Map | Cố định, player center, camera scroll |
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 | Thua | HP = 0 |
 | Thắng | Boss chết |
 
@@ -54,6 +81,7 @@
 
 ## Trạng thái hiện tại
 
+<<<<<<< HEAD
 **Ngày cập nhật**: 2026-05-20  
 **Giai đoạn**: **HOÀN CHỈNH** — toàn bộ logic + UI đã implement
 
@@ -101,6 +129,41 @@
 - `ui/screens/game_over_screen.py`
 - `ui/screens/win_screen.py`
 - `ui/screens/rune_builder_screen.py` — tab Inventory/Chỉ số
+=======
+**Ngày cập nhật**: 2026-04-30
+**Giai đoạn**: Skeleton hoàn chỉnh — đang implement từng file
+
+### File đã viết hoàn chỉnh (Claude)
+- [x] `SKELETON.md` — sườn toàn bộ project cho Gemini dùng
+- [x] `requirements.txt`
+- [x] `logic/rune/rune_component.py` — ABC Composite Pattern
+- [x] `logic/rune/rune_tree.py` — RuneTree MAX_DEPTH=3
+- [x] `logic/rune/elements/fire_rune.py` — FireRune
+- [x] `logic/entities/status_effect.py` — StatusEffect
+
+### File có skeleton trong SKELETON.md (→ Gemini implement)
+- [ ] `logic/entities/xp_orb.py`
+- [ ] `logic/entities/bullet.py`
+- [ ] `logic/entities/player.py`
+- [ ] `logic/entities/enemy.py`
+- [ ] `logic/entities/boss.py`
+- [ ] `logic/rune/elements/ice_rune.py`
+- [ ] `logic/rune/elements/poison_rune.py`
+- [ ] `logic/rune/modifiers/spiral_modifier.py`
+- [ ] `logic/rune/modifiers/bounce_modifier.py`
+- [ ] `logic/rune/modifiers/split_modifier.py`
+- [ ] `logic/wave/wave_manager.py`
+- [ ] `logic/leveling/level_manager.py`
+- [ ] `ui/input_handler.py`
+- [ ] `ui/renderer.py`
+- [ ] `ui/hud.py`
+- [ ] `ui/game_loop.py`
+- [ ] `ui/screens/main_menu.py`
+- [ ] `ui/screens/level_up_screen.py`
+- [ ] `ui/screens/game_over_screen.py`
+- [ ] `ui/screens/win_screen.py`
+- [ ] `main.py`
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
 ---
 
@@ -110,6 +173,7 @@
 |------|-----------|-------|
 | 2026-04-30 | Python + Pygame-CE | SV năm 1, quen thuộc |
 | 2026-04-30 | Composite Pattern cho Rune | Yêu cầu đề bài OOP |
+<<<<<<< HEAD
 | 2026-05-19 | 3 SpellBuild riêng | Mỗi chiêu có cây rune độc lập |
 | 2026-05-19 | Rune → inventory → builder | Thủ công hơn, chiều sâu hơn |
 | 2026-05-20 | Slot 0 element slot (Hướng B) | Nhánh chỉ Modifier, đơn giản hơn |
@@ -136,3 +200,12 @@
 | Combo tests (61 cases) | ✅ 61/61 PASSED |
 | Builder slot tests | ✅ PASSED |
 | SpellBuild/RuneSlots tests | ✅ 32 unittest PASSED |
+=======
+| 2026-04-30 | Tách logic/ + ui/ | Đề bài yêu cầu 2 phần |
+| 2026-04-30 | ElementRune = leaf, ModifierRune = composite | Clean Composite Pattern |
+| 2026-04-30 | Bullet nhận RuneTree runtime | Composition over Inheritance |
+| 2026-04-30 | Camera = world offset đơn giản | Phù hợp SV năm 1 |
+| 2026-04-30 | bullet.element_stack cho stack rune | Đơn giản, không cần đếm lại cây |
+| 2026-04-30 | Boss.pending_summon cờ cho WaveManager | Tách biệt logic boss và spawn |
+| 2026-04-30 | SKELETON.md cho Gemini/Gemma | Tiết kiệm token Claude |
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55

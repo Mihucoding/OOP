@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import math
 import os
 import random
@@ -34,11 +35,33 @@ LIGHTNING_BEAM_RANGE = 160.0
 LIGHTNING_BEAM_HIT_RADIUS = 24.0
 LIGHTNING_CHAIN_RADIUS = 280.0
 CAMERA_FOLLOW_SPEED = 9.5
+=======
+import pygame
+from logic.entities.player import Player
+from logic.entities.enemy import Enemy
+from logic.entities.boss import Boss
+from logic.entities.bullet import Bullet
+from logic.entities.xp_orb import XPOrb
+from logic.wave.wave_manager import WaveManager
+from logic.leveling.level_manager import LevelManager
+from ui.renderer import Renderer, SCREEN_W, SCREEN_H
+from ui.hud import HUD
+from ui.input_handler import InputHandler
+from ui.screens.main_menu import MainMenu
+from ui.screens.level_up_screen import LevelUpScreen
+from ui.screens.game_over_screen import GameOverScreen
+from ui.screens.win_screen import WinScreen
+
+FPS = 60
+WORLD_CENTER_X = 0.0   # player spawn
+WORLD_CENTER_Y = 0.0
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
 
 class GameLoop:
     """
     State machine chính:
+<<<<<<< HEAD
     MENU → PLAYING ⇄ RUNE_BUILDER → LEVEL_UP → GAME_OVER | WIN
     """
     STATE_MENU         = 'menu'
@@ -47,6 +70,15 @@ class GameLoop:
     STATE_RUNE_BUILDER = 'rune_builder'  # Tab → mở Rune Builder toàn màn hình
     STATE_GAME_OVER    = 'game_over'
     STATE_WIN          = 'win'
+=======
+    MENU → PLAYING → LEVEL_UP → (PLAYING) → GAME_OVER | WIN
+    """
+    STATE_MENU      = 'menu'
+    STATE_PLAYING   = 'playing'
+    STATE_LEVEL_UP  = 'level_up'
+    STATE_GAME_OVER = 'game_over'
+    STATE_WIN       = 'win'
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def __init__(self):
         pygame.init()
@@ -54,8 +86,13 @@ class GameLoop:
         pygame.display.set_caption("Rune Craft Roguelike")
         self.clock = pygame.time.Clock()
 
+<<<<<<< HEAD
         font_big   = self._load_font(36)
         font_small = self._load_font(14)
+=======
+        font_big   = pygame.font.SysFont(None, 64)
+        font_small = pygame.font.SysFont(None, 28)
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
         self.renderer    = Renderer(self.screen)
         self.hud         = HUD(self.screen, font_small)
@@ -64,6 +101,7 @@ class GameLoop:
         self.levelup_scr = LevelUpScreen(self.screen, font_big, font_small)
         self.gameover    = GameOverScreen(self.screen, font_big, font_small)
         self.win_scr     = WinScreen(self.screen, font_big, font_small)
+<<<<<<< HEAD
         self.builder     = RuneBuilderScreen(self.screen, font_big, font_small)
 
         self.state = self.STATE_MENU
@@ -97,12 +135,34 @@ class GameLoop:
         self.camera_y = self.player.y
 
     # ── Vòng lặp chính ────────────────────────────────────────────────────────
+=======
+
+        self.state = self.STATE_MENU
+        self._init_game_objects()
+
+    def _init_game_objects(self):
+        """Khởi tạo/reset toàn bộ objects cho 1 ván chơi mới."""
+        self.player   = Player(WORLD_CENTER_X, WORLD_CENTER_Y)
+        self.enemies: list[Enemy] = []
+        self.boss: Boss | None = None
+        self.bullets: list[Bullet] = []
+        self.xp_orbs: list[XPOrb] = []
+        self.wave_mgr  = WaveManager()
+        self.level_mgr = LevelManager()
+        self.time_played = 0.0
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def run(self) -> None:
         running = True
         while running:
+<<<<<<< HEAD
             self._dt = self.clock.tick(FPS) / 1000.0
 
+=======
+            dt = self.clock.tick(FPS) / 1000.0
+
+            # Xử lý event chung (QUIT)
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -110,12 +170,17 @@ class GameLoop:
                 if result == 'quit':
                     running = False
 
+<<<<<<< HEAD
             self._update(self._dt)
+=======
+            self._update(dt)
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
             self._draw()
             pygame.display.flip()
 
         pygame.quit()
 
+<<<<<<< HEAD
     # ── Xử lý sự kiện ─────────────────────────────────────────────────────────
 
     def _handle_event(self, event) -> str | None:
@@ -193,11 +258,24 @@ class GameLoop:
     # ── Update ────────────────────────────────────────────────────────────────
 
     def _update(self, dt: float) -> None:
+=======
+    def _handle_event(self, event) -> str | None:
+        """Chuyển event đến màn hình hiện tại."""
+        # STATE_MENU      → menu.handle_event
+        # STATE_LEVEL_UP  → levelup_scr.handle_event → apply_choice
+        # STATE_GAME_OVER → gameover.handle_event → restart hoặc quit
+        # STATE_WIN       → win_scr.handle_event
+        pass
+
+    def _update(self, dt: float) -> None:
+        """Cập nhật logic chỉ khi đang PLAYING."""
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         if self.state != self.STATE_PLAYING:
             return
 
         self.time_played += dt
 
+<<<<<<< HEAD
         # 1. Di chuyển player
         mx, my = self.input.get_move_direction()
         moving_input = math.hypot(mx, my) > 0
@@ -219,6 +297,18 @@ class GameLoop:
             self._clear_primary_lightning_beam()
         self._update_lightning_overload(dt, channeled_lightning)
         self._emit_lightning_overload_effect(dt, moving_input)
+=======
+        # 1. Input → di chuyển player
+        mx, my = self.input.get_move_direction()
+        self.player.update(dt, mx, my)
+
+        # 2. Bắn đạn nếu click và can_fire()
+        if self.input.is_firing() and self.player.can_fire():
+            wx, wy = self.input.get_mouse_world_pos(
+                self._camera_x(), self._camera_y())
+            self._spawn_bullet(wx, wy)
+            self.player.reset_fire_timer()
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
         # 3. Update enemies + boss
         for e in self.enemies:
@@ -226,6 +316,7 @@ class GameLoop:
         if self.boss:
             self.boss.update(dt, self.player.x, self.player.y)
 
+<<<<<<< HEAD
         # 4. RangedEnemy bắn đạn
         for e in self.enemies:
             if isinstance(e, RangedEnemy) and e.alive and e.can_fire():
@@ -253,11 +344,25 @@ class GameLoop:
         self._handle_enemy_player_collision(dt)
 
         # 9. Boss AoE
+=======
+        # 4. Update bullets (áp dụng rune on_update)
+        for b in self.bullets:
+            b.update(dt)
+
+        # 5. Collision: bullet ↔ enemy/boss
+        self._handle_bullet_collisions()
+
+        # 6. Collision: player ↔ enemy (damage player)
+        self._handle_enemy_player_collision(dt)
+
+        # 7. Boss AoE damage
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         if self.boss and self.boss.aoe_active:
             dmg = self.boss.check_aoe_hit(self.player.x, self.player.y)
             if dmg:
                 self.player.take_damage(dmg * dt)
 
+<<<<<<< HEAD
         # 10. XP orb — update magnet/scatter rồi collect
         for orb in self.xp_orbs:
             orb.update(dt, self.player.x, self.player.y,
@@ -270,10 +375,22 @@ class GameLoop:
                     self.state = self.STATE_LEVEL_UP
 
         # 11. Wave manager
+=======
+        # 8. XP orbs
+        for orb in self.xp_orbs:
+            if orb.check_collect(self.player.x, self.player.y):
+                leveled = self.player.add_xp(orb.value)
+                if leveled:
+                    self.level_mgr.trigger_level_up()
+                    self.state = self.STATE_LEVEL_UP
+
+        # 9. Wave manager
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         events = self.wave_mgr.update(
             dt, self.player.x, self.player.y, self.enemies, self.boss)
         self._process_wave_events(events)
 
+<<<<<<< HEAD
         # 12. Tick ultimate flash
         if self.ultimate_flash:
             self.ultimate_flash['duration'] -= dt
@@ -286,11 +403,18 @@ class GameLoop:
         self._cleanup()
 
         # 14. Kiểm tra kết thúc
+=======
+        # 10. Dọn dẹp dead objects
+        self._cleanup()
+
+        # 11. Kiểm tra game over / win
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         if not self.player.alive:
             self.state = self.STATE_GAME_OVER
         if self.boss and not self.boss.alive:
             self.state = self.STATE_WIN
 
+<<<<<<< HEAD
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _get_lightning_rune(self, spell):
@@ -659,10 +783,47 @@ class GameLoop:
     def _camera_y(self) -> float: return self.camera_y
 
     # ── Vẽ ────────────────────────────────────────────────────────────────────
+=======
+    def _spawn_bullet(self, target_x: float, target_y: float) -> None:
+        # Tạo Bullet(player.x, player.y, target_x, target_y, player.damage, player.rune_tree)
+        # Gọi rune_tree.on_fire() → nhận thêm bullet phụ (Split)
+        # Thêm vào self.bullets
+        pass
+
+    def _handle_bullet_collisions(self) -> None:
+        # Với mỗi bullet còn alive, kiểm tra va chạm với enemies + boss
+        # Va chạm: khoảng cách <= bullet.radius + target.radius
+        # Gọi bullet.on_hit(target, context)
+        # Trừ HP target (bullet.damage)
+        # Nếu target chết → drop XP orb
+        pass
+
+    def _handle_enemy_player_collision(self, dt: float) -> None:
+        # Nếu khoảng cách player ↔ enemy <= radii → player nhận 15 damage/s
+        pass
+
+    def _process_wave_events(self, events: dict) -> None:
+        # Xử lý events từ WaveManager
+        # spawn_enemies: tạo Enemy tại mỗi vị trí
+        # spawn_boss: tạo Boss, lưu vào self.boss
+        # summon_enemies: tạo N Enemy gần boss
+        pass
+
+    def _cleanup(self) -> None:
+        # Xóa bullets, enemies, xp_orbs có alive=False
+        pass
+
+    def _camera_x(self) -> float:
+        return self.player.x   # player luôn ở center
+
+    def _camera_y(self) -> float:
+        return self.player.y
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def _draw(self) -> None:
         if self.state == self.STATE_MENU:
             self.menu.draw()
+<<<<<<< HEAD
 
         elif self.state in (self.STATE_PLAYING, self.STATE_LEVEL_UP):
             self.renderer.draw_all(
@@ -682,5 +843,22 @@ class GameLoop:
         elif self.state == self.STATE_GAME_OVER:
             self.gameover.draw(self.wave_mgr.wave, self.time_played)
 
+=======
+        elif self.state == self.STATE_PLAYING:
+            self.renderer.draw_all(
+                self.player, self.enemies, self.boss,
+                self.bullets, self.xp_orbs,
+                self._camera_x(), self._camera_y())
+            self.hud.draw(self.player, self.wave_mgr.get_wave_info())
+        elif self.state == self.STATE_LEVEL_UP:
+            self.renderer.draw_all(
+                self.player, self.enemies, self.boss,
+                self.bullets, self.xp_orbs,
+                self._camera_x(), self._camera_y())
+            self.hud.draw(self.player, self.wave_mgr.get_wave_info())
+            self.levelup_scr.draw(self.level_mgr.current_choices)
+        elif self.state == self.STATE_GAME_OVER:
+            self.gameover.draw(self.wave_mgr.wave, self.time_played)
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         elif self.state == self.STATE_WIN:
             self.win_scr.draw(self.time_played)

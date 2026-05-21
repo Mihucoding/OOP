@@ -11,6 +11,7 @@ class PoisonRune(ElementRune):
     POISON_DURATION = 5.0
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
+<<<<<<< HEAD
         poison = StatusEffect(
             effect_type='poison',
             damage_per_sec=self.POISON_DAMAGE * bullet.element_stack,
@@ -21,4 +22,14 @@ class PoisonRune(ElementRune):
     def get_display_name(self) -> str: return "Poison Rune"
     def get_description(self) -> str:
         return f"Poisons for {self.POISON_DAMAGE} HP/s over {self.POISON_DURATION}s"
+=======
+        # Tạo StatusEffect loại 'poison'
+        # damage_per_sec = POISON_DAMAGE * bullet.element_stack
+        # duration = POISON_DURATION
+        pass
+
+    def get_display_name(self) -> str: return "Rune Độc"
+    def get_description(self) -> str:
+        return f"Độc {self.POISON_DAMAGE} HP/s trong {self.POISON_DURATION}s"
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
     def get_color(self) -> tuple: return (120, 255, 80)

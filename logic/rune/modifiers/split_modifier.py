@@ -14,6 +14,7 @@ class SplitModifier(ModifierRune):
         self.stack = 1
 
     def on_fire(self, bullet, context: dict) -> list:
+<<<<<<< HEAD
         from logic.entities.bullet import Bullet
         new_bullets  = []
         base_angle   = math.atan2(bullet.vy, bullet.vx)
@@ -35,10 +36,22 @@ class SplitModifier(ModifierRune):
                 b.bounce_count   = bullet.bounce_count
                 new_bullets.append(b)
         return new_bullets
+=======
+        # Tạo thêm (2 * self.stack) viên đạn mới:
+        # Mỗi cặp lệch ±SPLIT_ANGLE * i so với hướng gốc
+        # Clone bullet (vị trí giống, rune_tree giống, chỉ đổi vx/vy)
+        # Trả về list[Bullet] mới
+        pass
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def on_update(self, bullet, dt: float) -> None:
         pass
 
+<<<<<<< HEAD
     def get_display_name(self) -> str: return "Split Rune"
     def get_description(self) -> str: return "Shots create 2 extra bullets"
+=======
+    def get_display_name(self) -> str: return "Rune Tách"
+    def get_description(self) -> str: return "Bắn tạo thêm 2 viên đạn"
+>>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
     def get_color(self) -> tuple: return (255, 180, 100)
