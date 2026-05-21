@@ -1,0 +1,19 @@
+1. Thông tin chung
+• Thể loại: 2D Top-down Survival Roguelike (Góc nhìn từ trên xuống).
+• Mục tiêu: Sinh tồn giữa các đợt quái vật đông đúc. Tiêu diệt quái, nhặt vật phẩm kinh nghiệm (XP) rơi ra để thăng cấp và nhận thêm sức mạnh.
+2. Cơ chế Điều khiển (Controls)
+• Di chuyển: Sử dụng 4 phím W, A, S, D để điều khiển nhân vật chạy theo 4 hướng (lên, trái, xuống, phải) và các hướng chéo.
+• Tấn công: Con trỏ chuột dùng để ngắm hướng. Click chuột (trái) để bắn đạn từ vị trí nhân vật bay thẳng về phía tọa độ của con trỏ chuột.
+3. Cơ chế Trọng tâm: Ghép Rune (Spell Crafting)
+Đây là tính năng cốt lõi làm nên sự khác biệt của game. Người chơi không dùng các chiêu thức có sẵn mà sẽ tự "lắp ráp" đạn đạo từ các mảnh ghép (Rune) nhận được mỗi khi lên cấp.
+Hệ thống cấu tạo từ 2 thành phần độc lập:
+• Rune Nguyên tố (Element): Định hình lõi của đạn. Xử lý logic khi va chạm với quái (Ví dụ: Lửa để thiêu đốt, Băng để làm chậm tốc độ chạy, Độc để rút máu từ từ).
+• Rune Quỹ đạo (Modifier): Định hình tính chất vật lý của đạn. Xử lý logic di chuyển (Ví dụ: Đạn bay hình xoắn ốc, đạn tự nảy sang quái khác, đạn tách làm 3 viên).
+Quy tắc kết nối theo Dạng Cây (Tree-based Structure):
+Thứ tự và vị trí lắp ghép các Rune sẽ trực tiếp thay đổi hành vi của chiêu thức đầu ra.
+• Cấu trúc Song song: Nếu gắn Rune Xoay và Rune Băng cùng lúc vào Nguyên Tố Chính (Lõi) -> Viên đạn sẽ bay xoắn ốc và mang hiệu ứng đóng băng.
+• Cấu trúc Nối tiếp (Cha - Con): Nếu gắn Rune Băng vào Lõi, sau đó gắn Rune Xoay làm "con" của Rune Băng -> Lõi đạn chính vẫn bay thẳng, nhưng hiệu ứng luồng băng tỏa ra xung quanh sẽ xoay tròn (như máy xay sinh tố).
+4. Giá trị Kỹ thuật (Góc nhìn Lập trình Hướng đối tượng)
+• Game giải quyết bài toán thêm tính năng mới mà không sửa code cũ (Nguyên lý Open/Closed).
+• Áp dụng quy tắc "Ưu tiên Lắp ráp thay vì Kế thừa" (Composition over Inheritance). Khi muốn tạo ra một đường đạn "Lửa Xoắn Ốc", lập trình viên không cần phải viết một class DanLuaXoanOc. Chỉ cần viết độc lập 1 class Lửa và 1 class Xoắn Ốc, hệ thống Composite Pattern sẽ tự động cho phép ghép nối chúng lại với nhau lúc game đang chạy. Hàng chục class đơn lẻ có thể tạo ra hàng trăm biến thể tấn công khác nhau.
+
