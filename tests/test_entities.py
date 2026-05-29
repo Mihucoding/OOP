@@ -60,5 +60,23 @@ class TestEntities(unittest.TestCase):
         boss.update(0.1, 1000, 0)
         self.assertAlmostEqual(boss.x, 35.0) # Frame 1 chốt target, Frame 2 mới bắt đầu lao
 
+    def test_enemy_multipliers(self):
+        enemy = Enemy(0, 0, hp_mult=1.5, speed_mult=1.2)
+        self.assertEqual(enemy.max_hp, Enemy.BASE_HP * 1.5)
+        self.assertEqual(enemy.speed, Enemy.BASE_SPEED * 1.2)
+        self.assertEqual(enemy.damage, 20.0 * 1.5)
+
+    def test_fast_enemy(self):
+        from logic.entities.fast_enemy import FastEnemy
+        enemy = FastEnemy(0, 0, hp_mult=2.0, speed_mult=1.0)
+        self.assertEqual(enemy.max_hp, FastEnemy.BASE_HP * 2.0)
+        self.assertEqual(enemy.speed, FastEnemy.BASE_SPEED * 1.0)
+
+    def test_tank_enemy(self):
+        from logic.entities.tank_enemy import TankEnemy
+        enemy = TankEnemy(0, 0, hp_mult=1.0, speed_mult=0.5)
+        self.assertEqual(enemy.max_hp, TankEnemy.BASE_HP * 1.0)
+        self.assertEqual(enemy.speed, TankEnemy.BASE_SPEED * 0.5)
+
 if __name__ == '__main__':
     unittest.main()

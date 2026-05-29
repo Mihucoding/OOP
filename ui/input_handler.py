@@ -14,22 +14,13 @@ class InputHandler:
         move_y = keys[pygame.K_s] - keys[pygame.K_w]
         return move_x, move_y
 
-<<<<<<< HEAD
     def get_mouse_world_pos(self, camera_x: float, camera_y: float, zoom: float = 1.0) -> tuple:
-=======
-    def get_mouse_world_pos(self, camera_x: float, camera_y: float) -> tuple:
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         # pygame.mouse.get_pos() → (screen_x, screen_y)
         # Chuyển sang world coords: world_x = screen_x + camera_x - SCREEN_W/2
         # Trả về (world_x, world_y)
         mouse_x, mouse_y = pygame.mouse.get_pos()
-<<<<<<< HEAD
         world_x = (mouse_x - SCREEN_W / 2) / zoom + camera_x
         world_y = (mouse_y - SCREEN_H / 2) / zoom + camera_y
-=======
-        world_x = mouse_x + camera_x - SCREEN_W / 2
-        world_y = mouse_y + camera_y - SCREEN_H / 2
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
         return world_x, world_y
 
     def is_firing(self) -> bool:

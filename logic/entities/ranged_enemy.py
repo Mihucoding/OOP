@@ -8,8 +8,8 @@ class RangedEnemy(Enemy):
     STOP_DISTANCE = 350
     FIRE_RATE = 2.0  # giây giữa 2 lần bắn
 
-    def __init__(self, x: float, y: float):
-        super().__init__(x, y)
+    def __init__(self, x: float, y: float, hp_mult=1.0, speed_mult=1.0):
+        super().__init__(x, y, hp_mult, speed_mult)
         self.fire_timer = self.FIRE_RATE
 
     def update(self, dt: float, player_x: float, player_y: float) -> None:
@@ -23,12 +23,9 @@ class RangedEnemy(Enemy):
                 if eff.type == 'slow':
                     slow_factor = min(slow_factor, eff.slow_factor)
         self.status_effects = active_effects
-<<<<<<< HEAD
         if self.cast_lock_timer > 0:
             self.cast_lock_timer = max(0.0, self.cast_lock_timer - dt)
             return
-=======
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
         # 2. Logic di chuyển: Chỉ đuổi theo nếu ở xa
         dist = math.hypot(player_x - self.x, player_y - self.y)
@@ -45,11 +42,7 @@ class RangedEnemy(Enemy):
             self.fire_timer -= dt
 
     def can_fire(self) -> bool:
-<<<<<<< HEAD
         return self.fire_timer <= 0 and self.cast_lock_timer <= 0
-=======
-        return self.fire_timer <= 0
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def reset_fire_timer(self) -> None:
         self.fire_timer = self.FIRE_RATE

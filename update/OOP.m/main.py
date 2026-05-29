@@ -5,7 +5,7 @@ import math
 import random
 from config import *
 from player import Player
-from entities import Enemy, RangedEnemy, Boss, ExpGem, EnemyBullet
+from entities import Enemy, RangedEnemy, Boss, ExpGem, EnemyBullet, FastEnemy, TankEnemy
 from spells import SpellManager
 from runes import CoreRune, SplitRune, BounceRune, SpiralRune, HeavyBurdenRune, HeavyHitterRune, SelfCenteredRune
 from status_effect import StatusEffect
@@ -480,6 +480,9 @@ def main():
     level_up_options = []
     t_anim       = 0.0   # animation timer for select screen
 
+    wave_notif_timer = 0.0
+    wave_notif_text = ""
+
     # Mouse state tracking
     mouse_held      = False
     just_released   = False
@@ -653,18 +656,38 @@ def main():
             if spawn_timer >= SPAWN_INT:
                 spawn_timer = 0.0
                 wave_num   += 1
+                
+                hp_mult = 1.0 + (wave_num * 0.05)
+                speed_mult = 1.0 + (wave_num * 0.02)
+
+                if wave_num == BOSS_WAVE:
+                    wave_notif_text = "WARNING: BOSS INCOMING!"
+                elif wave_num == 10:
+                    wave_notif_text = f"WAVE {wave_num} - TANK ENEMIES APPEAR!"
+                elif wave_num == 5:
+                    wave_notif_text = f"WAVE {wave_num} - FAST ENEMIES APPEAR!"
+                else:
+                    wave_notif_text = f"WAVE {wave_num}"
+                wave_notif_timer = 3.0
+                
                 sx, sy = random_spawn_pos(player.x, player.y)
                 if wave_num >= BOSS_WAVE and boss is None:
-                    boss = Boss(sx, sy)
+                    boss = Boss(sx, sy, hp_mult=hp_mult, speed_mult=speed_mult)
                 else:
-                    count = min(1 + wave_num // 3, 5)
+                    # Tăng nhẹ số lượng quái max để màn chơi đông hơn
+                    count = min(1 + wave_num // 3, 10)
                     for _ in range(count):
                         ex, ey = random_spawn_pos(player.x, player.y,
                                                   500 + random.randint(-100, 100))
-                        if wave_num >= 3 and random.random() < 0.3:
-                            enemies.append(RangedEnemy(ex, ey))
+                        rand_val = random.random()
+                        if wave_num >= 10 and rand_val < 0.15:
+                            enemies.append(TankEnemy(ex, ey, hp_mult=hp_mult, speed_mult=speed_mult))
+                        elif wave_num >= 5 and rand_val < 0.35:
+                            enemies.append(FastEnemy(ex, ey, hp_mult=hp_mult, speed_mult=speed_mult))
+                        elif wave_num >= 3 and rand_val < 0.65:
+                            enemies.append(RangedEnemy(ex, ey, hp_mult=hp_mult, speed_mult=speed_mult))
                         else:
-                            enemies.append(Enemy(ex, ey))
+                            enemies.append(Enemy(ex, ey, hp_mult=hp_mult, speed_mult=speed_mult))
 
             # Lightning movement logic
             base_speed = Player.BASE_SPEED
@@ -800,7 +823,8 @@ def main():
                 enemy.update(dt, player.x, player.y)
                 if math.hypot(player.x-enemy.x, player.y-enemy.y) < player.radius+enemy.radius \
                    and player_ihit <= 0:
-                    player.take_damage(10); player_ihit = HIT_CD
+                    dmg = getattr(enemy, 'damage', 10.0)
+                    player.take_damage(dmg); player_ihit = HIT_CD
                 if isinstance(enemy, RangedEnemy) and enemy.can_fire():
                     enemy.reset_fire_timer()
                     enemy_bullets.append(EnemyBullet(enemy.x, enemy.y, player.x, player.y))
@@ -851,6 +875,13 @@ def main():
             player.spell_manager.draw(screen, cx, cy)
 
             draw_hud(screen, player, boss, wave_num, font, font_l)
+
+            if wave_notif_timer > 0:
+                wave_notif_timer -= dt
+                alpha = min(255, max(0, int((wave_notif_timer / 3.0) * 255 * 2)))
+                notif_surf = font_l.render(wave_notif_text, True, YELLOW)
+                notif_surf.set_alpha(alpha)
+                screen.blit(notif_surf, (WIDTH//2 - notif_surf.get_width()//2, HEIGHT//4))
 
             if game_state == "GAME_OVER":
                 ov = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)

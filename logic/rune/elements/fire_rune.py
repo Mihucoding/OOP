@@ -20,17 +20,10 @@ class FireRune(ElementRune):
         enemy.add_status(burn)
 
     def get_display_name(self) -> str:
-<<<<<<< HEAD
         return "Fire Rune"
 
     def get_description(self) -> str:
         return f"Burns for {self.BURN_DAMAGE} HP/s over {self.BURN_DURATION}s"
-=======
-        return "Rune Lửa"
-
-    def get_description(self) -> str:
-        return f"Đốt cháy {self.BURN_DAMAGE} HP/s trong {self.BURN_DURATION}s"
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def get_color(self) -> tuple:
         return (255, 100, 30)

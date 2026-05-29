@@ -13,15 +13,17 @@ class Enemy:
     BASE_HP = 50
     BASE_SPEED = 100
     XP_VALUE = 10
+    COLOR = RED
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, hp_mult=1.0, speed_mult=1.0):
         self.x = float(x)
         self.y = float(y)
-        self.radius = Enemy.RADIUS
-        self.max_hp = Enemy.BASE_HP
-        self.hp = float(Enemy.BASE_HP)
-        self.speed = Enemy.BASE_SPEED
-        self.xp_value = Enemy.XP_VALUE
+        self.radius = self.__class__.RADIUS
+        self.max_hp = self.__class__.BASE_HP * hp_mult
+        self.hp = float(self.max_hp)
+        self.speed = self.__class__.BASE_SPEED * speed_mult
+        self.damage = 20.0 * hp_mult
+        self.xp_value = self.__class__.XP_VALUE
         self.alive = True
         self.status_effects: list = []
 
@@ -68,7 +70,8 @@ class Enemy:
         sx = int(self.x - cx)
         sy = int(self.y - cy)
         # Thân
-        pygame.draw.circle(screen, RED, (sx, sy), self.radius)
+        color = getattr(self.__class__, 'COLOR', RED)
+        pygame.draw.circle(screen, color, (sx, sy), self.radius)
         # HP bar
         bar_w = self.radius * 2
         bar_h = 4
@@ -98,6 +101,27 @@ class Enemy:
 
 
 # ===========================================================================
+#  FAST ENEMY — tốc độ cao, máu yếu
+# ===========================================================================
+class FastEnemy(Enemy):
+    RADIUS = 15
+    BASE_HP = 30
+    BASE_SPEED = 150
+    XP_VALUE = 15
+    COLOR = YELLOW
+
+# ===========================================================================
+#  TANK ENEMY — tốc độ cực chậm, máu siêu trâu
+# ===========================================================================
+class TankEnemy(Enemy):
+    RADIUS = 35
+    BASE_HP = 200
+    BASE_SPEED = 40
+    XP_VALUE = 30
+    COLOR = (139, 69, 19)  # Brown
+
+
+# ===========================================================================
 #  RANGED ENEMY — giữ khoảng cách, bắn đạn
 # ===========================================================================
 class RangedEnemy(Enemy):
@@ -109,13 +133,8 @@ class RangedEnemy(Enemy):
     STOP_DISTANCE = 300
     FIRE_RATE = 2.0   # giây giữa 2 lần bắn
 
-    def __init__(self, x, y):
-        super().__init__(x, y)
-        self.radius = RangedEnemy.RADIUS
-        self.max_hp = RangedEnemy.BASE_HP
-        self.hp = float(RangedEnemy.BASE_HP)
-        self.speed = RangedEnemy.BASE_SPEED
-        self.xp_value = RangedEnemy.XP_VALUE
+    def __init__(self, x, y, hp_mult=1.0, speed_mult=1.0):
+        super().__init__(x, y, hp_mult, speed_mult)
         self.fire_timer = self.FIRE_RATE
 
     def update(self, dt, player_x, player_y):
@@ -208,13 +227,8 @@ class Boss(Enemy):
     SUMMON_COOLDOWN = 15.0
     SUMMON_COUNT = 3
 
-    def __init__(self, x, y):
-        super().__init__(x, y)
-        self.radius = Boss.RADIUS
-        self.max_hp = Boss.BASE_HP
-        self.hp = float(Boss.BASE_HP)
-        self.speed = Boss.BASE_SPEED
-        self.xp_value = Boss.XP_VALUE
+    def __init__(self, x, y, hp_mult=1.0, speed_mult=1.0):
+        super().__init__(x, y, hp_mult, speed_mult)
 
         # Charge state
         self.charge_cooldown_timer = 5.0

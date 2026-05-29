@@ -14,7 +14,6 @@ class SpiralModifier(ModifierRune):
         self.stack = 1   # tăng khi player chọn lại
 
     def on_update(self, bullet, dt: float) -> None:
-<<<<<<< HEAD
         # Xoay vector vận tốc một góc nhỏ mỗi frame
         angle_rad = math.radians(self.ROTATE_SPEED * self.stack * dt)
         cos_a     = math.cos(angle_rad)
@@ -23,23 +22,10 @@ class SpiralModifier(ModifierRune):
         vy_new    = bullet.vx * sin_a + bullet.vy * cos_a
         bullet.vx = vx_new
         bullet.vy = vy_new
-=======
-        # Mỗi frame: xoay vector (vx, vy) một góc nhỏ
-        # angle_rad = math.radians(ROTATE_SPEED * self.stack * dt)
-        # vx_new = vx*cos - vy*sin
-        # vy_new = vx*sin + vy*cos
-        # Cập nhật bullet.vx, bullet.vy
-        pass
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
 
     def on_fire(self, bullet, context: dict) -> list:
         return []
 
-<<<<<<< HEAD
     def get_display_name(self) -> str: return "Spiral Rune"
     def get_description(self) -> str: return "Bullets fly in a spiral path"
-=======
-    def get_display_name(self) -> str: return "Rune Xoắn Ốc"
-    def get_description(self) -> str: return "Đạn bay theo quỹ đạo xoắn ốc"
->>>>>>> 3e15ae77a0ed8863193acdf98696434a388c7c55
     def get_color(self) -> tuple: return (200, 150, 255)
