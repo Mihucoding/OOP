@@ -29,4 +29,14 @@ Gửi Leader, dưới đây là những thay đổi và cập nhật mình vừa
 - Đã viết thêm 3 Unit Test mới cho cơ chế Multiplier (hệ số máu/tốc độ) và 2 class quái mới vào `tests/test_entities.py`.
 - Toàn bộ codebase hiện tại đã được Test phủ: Tổng cộng **43/43 tests** đều chạy thành công (Passed).
 
-> **Lời nhắn:** Kế hoạch hiện tại là chúng ta sẽ thống nhất giữ vững cấu trúc thư mục Clean Architecture này (`logic/` và `ui/` phân tách rõ ràng) để dễ test và tránh conflict về sau nhé!
+## 6. Nâng cấp AI Cận chiến (Action Roguelike) & Hitbox
+- **Xóa bỏ Sát thương Chạm thân (Contact Damage)** cho quái thường. Giờ đây quái sẽ không tự động trừ máu khi cọ xát vào người chơi.
+- Bổ sung **State Machine (Máy Trạng Thái)** cho quái: `RUN` -> `ATTACK` -> `COOLDOWN`. Quái tiếp cận, đứng lại thực hiện đòn chém, và chỉ tạo vùng **Hitbox Vũ khí** ngay tại khoảnh khắc chém.
+- Con `FastEnemy` được trang bị riêng cơ chế **Wind-up (gồng)** và **Lunge (lao cực nhanh)** tạo độ khó cao, bắt buộc người chơi phải dùng kỹ năng lướt (Dash) để né.
+
+## 7. Tích hợp Hoạt ảnh (Sprite Animations)
+- **Enemy Thường**: Được khoác lên bộ áo của Nấm Nổi Điên (`assets/sprites/Mushroom`). Đầy đủ animation: Chạy, Cắn, Bị bắn trúng (Hit) và Nằm gục (Die).
+- **Ranged Enemy**: Sử dụng bộ áo Quái vật Bay (`assets/sprites/Ranged`). Đã bổ sung logic "đứng yên khóa chân (`cast_lock`) trong 0.5s" khi bắn đạn để tạo cảm giác thực tế.
+- Xử lý mượt mà hiện tượng Moonwalk (tự động quay đầu `facing_dir`), đồng bộ thời gian chết để không bị lỗi hitbox, và tinh chỉnh vị trí Thanh Máu (HP Bar) lên cao để không bị che bởi Sprite.
+
+> **Lời nhắn:** Kế hoạch hiện tại là chúng ta sẽ thống nhất giữ vững cấu trúc thư mục Clean Architecture này (`logic/` và `ui/` phân tách rõ ràng) để dễ test và tránh conflict về sau nhé! Cả phần Hitbox cận chiến này sau này có thể tái sử dụng dễ dàng cho người chơi.

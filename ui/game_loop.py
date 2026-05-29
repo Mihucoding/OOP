@@ -554,13 +554,14 @@ class GameLoop:
             if not bullet.alive:
                 continue
             for enemy in self.enemies:
-                if not enemy.alive:
+                if enemy.hp <= 0:
                     continue
                 dist = math.hypot(bullet.x - enemy.x, bullet.y - enemy.y)
                 if dist <= bullet.radius + enemy.radius:
                     bullet.on_hit(enemy, context)
                     enemy.take_damage(bullet.damage)
-                    if not enemy.alive:
+                    if enemy.hp <= 0 and not getattr(enemy, 'xp_dropped', False):
+                        enemy.xp_dropped = True
                         self.xp_orbs.extend(enemy.drop_xp(self.player.lucky))
                     break
             if bullet.alive and self.boss and self.boss.alive:
@@ -573,11 +574,16 @@ class GameLoop:
 
     def _handle_enemy_player_collision(self, dt: float) -> None:
         for enemy in self.enemies:
-            if not enemy.alive:
+            if enemy.hp <= 0:
                 continue
-            dist = math.hypot(self.player.x - enemy.x, self.player.y - enemy.y)
-            if dist <= self.player.radius + enemy.radius:
-                self.player.take_damage(CONTACT_DAMAGE * dt)
+            # Kiểm tra sát thương từ vũ khí (Hitbox)
+            if getattr(enemy, 'attack_hitbox', None):
+                hx, hy, hr = enemy.attack_hitbox
+                dist = math.hypot(self.player.x - hx, self.player.y - hy)
+                if dist <= self.player.radius + hr:
+                    self.player.take_damage(enemy.damage)
+                    enemy.attack_hitbox = None # Xoá hitbox ngay sau khi hit trúng để không bị trừ máu nhiều lần trong 1 đòn
+
         if self.boss and self.boss.alive:
             dist = math.hypot(self.player.x - self.boss.x, self.player.y - self.boss.y)
             if dist <= self.player.radius + self.boss.radius:

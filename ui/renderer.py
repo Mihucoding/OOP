@@ -47,9 +47,12 @@ class Renderer:
         self.player_anim_started_ms = 0
         self.effect_animations: dict[str, list[pygame.Surface]] = {}
         self.effect_glow_animations: dict[str, list[pygame.Surface]] = {}
+        self.effect_glow_animations: dict[str, list[pygame.Surface]] = {}
+        self.mushroom_animations: dict[str, list[pygame.Surface]] = {}
         self.world_map = None
         self._load_player_animations()
         self._load_effect_animations()
+        self._load_enemy_animations()
         try:
             from ui.tile_map import WorldMap
             self.world_map = WorldMap()
@@ -98,6 +101,68 @@ class Renderer:
             )
             frame = sheet.subsurface(rect).copy()
             frames.append(pygame.transform.scale(frame, self.player_draw_size))
+        return frames
+
+    def _load_enemy_animations(self) -> None:
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sprite_dir = os.path.join(root_dir, "assets", "sprites", "Mushroom")
+        sheets = {
+            "idle": "Mushroom-Idle.png",
+            "run": "Mushroom-Run.png",
+            "attack": "Mushroom-Attack.png",
+            "hit": "Mushroom-Hit.png",
+            "die": "Mushroom-Die.png",
+        }
+        for anim_name, filename in sheets.items():
+            path = os.path.join(sprite_dir, filename)
+            frames = self._slice_mushroom_sheet(path)
+            if frames:
+                self.mushroom_animations[anim_name] = frames
+
+        # Load Ranged Enemy (Enemy3)
+        self.ranged_animations: dict[str, list[pygame.Surface]] = {}
+        ranged_dir = os.path.join(root_dir, "assets", "sprites", "Ranged")
+        r_sheets = {
+            "idle": "Enemy3-Idle.png",
+            "run": "Enemy3-Fly.png",
+            "hit": "Enemy3-Hit.png",
+            "die": "Enemy3-Die.png",
+        }
+        for anim_name, filename in r_sheets.items():
+            path = os.path.join(ranged_dir, filename)
+            frames = self._slice_ranged_sheet(path)
+            if frames:
+                self.ranged_animations[anim_name] = frames
+
+    def _slice_ranged_sheet(self, path: str) -> list[pygame.Surface]:
+        try:
+            sheet = pygame.image.load(path).convert_alpha()
+        except Exception:
+            return []
+        frame_w, frame_h = 64, 64
+        frame_count = sheet.get_width() // frame_w
+        frames = []
+        for i in range(frame_count):
+            rect = pygame.Rect(i * frame_w, 0, frame_w, frame_h)
+            frame = sheet.subsurface(rect).copy()
+            frame = pygame.transform.scale(frame, (frame_w * 2, frame_h * 2))
+            frames.append(frame)
+        return frames
+
+    def _slice_mushroom_sheet(self, path: str) -> list[pygame.Surface]:
+        try:
+            sheet = pygame.image.load(path).convert_alpha()
+        except Exception:
+            return []
+        frame_w, frame_h = 80, 64
+        frame_count = sheet.get_width() // frame_w
+        frames = []
+        for i in range(frame_count):
+            rect = pygame.Rect(i * frame_w, 0, frame_w, frame_h)
+            frame = sheet.subsurface(rect).copy()
+            # Phóng to sprite lên một chút vì gốc khá nhỏ
+            frame = pygame.transform.scale(frame, (frame_w * 2, frame_h * 2))
+            frames.append(frame)
         return frames
 
     def _load_effect_animations(self) -> None:
@@ -246,14 +311,77 @@ class Renderer:
         # Status halo (vòng màu bên ngoài)
         self._draw_status_halo(enemy, sx, sy)
 
-        # Thân
+        # Xác định logic hoạt hoạ (Animation)
+        state = getattr(enemy, 'state', 'run')
+        anim_name = 'run'
         from logic.entities.ranged_enemy import RangedEnemy
-        color = self.COLOR_RANGED if isinstance(enemy, RangedEnemy) else self.COLOR_ENEMY
-        radius = self._zoom_len(enemy.radius)
-        pygame.draw.circle(self.screen, color, (sx, sy), radius)
+        is_ranged = isinstance(enemy, RangedEnemy)
+        
+        if state == 'die':
+            anim_name = 'die'
+        elif getattr(enemy, 'hurt_timer', 0.0) > 0:
+            anim_name = 'hit'
+        elif state == 'attack':
+            anim_name = 'attack'
+        elif state == 'cooldown' or state == 'windup' or getattr(enemy, 'cast_lock_timer', 0.0) > 0:
+            anim_name = 'idle'
+        elif state == 'lunge':
+            anim_name = 'run'
+            
+        # Ranged Enemy stop moving logic fallback to idle
+        if is_ranged and anim_name == 'run':
+            dist = math.hypot(enemy.x - cam_x, enemy.y - cam_y) # just approx
+            # Actually RangedEnemy doesn't have is_moving, but it stops when close
+            if getattr(enemy, 'cast_lock_timer', 0.0) > 0:
+                anim_name = 'idle'
+
+        if is_ranged:
+            frames = self.ranged_animations.get(anim_name)
+        else:
+            frames = self.mushroom_animations.get(anim_name)
+            
+        if (type(enemy).__name__ == "Enemy" or is_ranged) and frames:
+            # Sprite cho Enemy thường hoặc Ranged
+            frame_count = len(frames)
+            if state == 'die':
+                # Chạy frame dựa trên die_timer
+                timer = getattr(enemy, 'die_timer', 0.0)
+                idx = min(frame_count - 1, int((timer / 1.2) * frame_count))
+            elif state == 'attack':
+                # Tính frame dựa trên tiến độ của attack_timer
+                timer = getattr(enemy, 'attack_timer', 0.0)
+                duration = getattr(enemy, 'ATTACK_DURATION', 0.8)
+                idx = min(frame_count - 1, int((timer / duration) * frame_count))
+            else:
+                # Chạy loop bình thường
+                idx = (pygame.time.get_ticks() // 80) % frame_count
+                
+            img = self._zoom_surface(frames[idx])
+            # Hình mặc định thường quay đầu sang trái, nên ta phải lật hình khi nó đi sang phải (facing_dir > 0)
+            if getattr(enemy, 'facing_dir', 1) > 0:
+                img = pygame.transform.flip(img, True, False)
+                
+            # Căn chỉnh để sprite chạm đất
+            self.screen.blit(img, img.get_rect(midbottom=(sx, sy + self._zoom_len(20))))
+        else:
+            # Fallback hình tròn cho FastEnemy, TankEnemy
+            color = getattr(enemy, 'COLOR', self.COLOR_ENEMY)
+            if is_ranged: color = self.COLOR_RANGED
+            radius = self._zoom_len(enemy.radius)
+            pygame.draw.circle(self.screen, color, (sx, sy), radius)
+            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 2)
+
+        # Debug Hitbox đòn đánh (Chỉ bật khi dev)
+        # if getattr(enemy, 'attack_hitbox', None):
+        #     hx, hy, hr = enemy.attack_hitbox
+        #     hsx, hsy = self.world_to_screen(hx, hy, cam_x, cam_y)
+        #     pygame.draw.circle(self.screen, (255,0,0), (hsx, hsy), self._zoom_len(hr), 1)
 
         # HP bar
-        self._draw_hp_bar(enemy, sx, sy, radius)
+        hp_offset_radius = self._zoom_len(enemy.radius)
+        if type(enemy).__name__ == "Enemy" or is_ranged:
+            hp_offset_radius += self._zoom_len(40)  # Đẩy thanh máu lên trên đỉnh đầu của Sprite
+        self._draw_hp_bar(enemy, sx, sy, hp_offset_radius)
 
     def draw_boss(self, boss, cam_x, cam_y) -> None:
         sx, sy = self.world_to_screen(boss.x, boss.y, cam_x, cam_y)

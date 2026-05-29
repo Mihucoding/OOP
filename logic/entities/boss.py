@@ -49,6 +49,13 @@ class Boss(Enemy):
         self.pending_summon = False   # WaveManager đọc cờ này
 
     def update(self, dt: float, player_x: float, player_y: float) -> None:
+        self.hurt_timer = max(0.0, getattr(self, 'hurt_timer', 0.0) - dt)
+        if getattr(self, 'state', '') == 'die':
+            self.die_timer += dt
+            if self.die_timer >= 1.2:
+                self.alive = False
+            return
+
         # 1. Cập nhật status_effects (xử lý slow, chill, stun như nhau qua slow_factor)
         slow_factor    = 1.0
         active_effects = []

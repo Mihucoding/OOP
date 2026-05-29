@@ -13,6 +13,13 @@ class RangedEnemy(Enemy):
         self.fire_timer = self.FIRE_RATE
 
     def update(self, dt: float, player_x: float, player_y: float) -> None:
+        self.hurt_timer = max(0.0, getattr(self, 'hurt_timer', 0.0) - dt)
+        if getattr(self, 'state', '') == 'die':
+            self.die_timer += dt
+            if self.die_timer >= 1.2:
+                self.alive = False
+            return
+            
         # 1. Cập nhật status effects từ class cha
         slow_factor = 1.0
         active_effects = []
@@ -20,18 +27,22 @@ class RangedEnemy(Enemy):
             eff.update(self, dt)
             if not eff.is_expired():
                 active_effects.append(eff)
-                if eff.type == 'slow':
+                if eff.slow_factor < 1.0:
                     slow_factor = min(slow_factor, eff.slow_factor)
         self.status_effects = active_effects
+        
+        # Quay mặt theo hướng player bất kể có đang di chuyển hay không
+        move_x = player_x - self.x
+        if move_x != 0:
+            self.facing_dir = 1 if move_x > 0 else -1
+            
         if self.cast_lock_timer > 0:
             self.cast_lock_timer = max(0.0, self.cast_lock_timer - dt)
             return
 
         # 2. Logic di chuyển: Chỉ đuổi theo nếu ở xa
         dist = math.hypot(player_x - self.x, player_y - self.y)
-        
         if dist > self.STOP_DISTANCE:
-            move_x = player_x - self.x
             move_y = player_y - self.y
             if dist > 0:
                 self.x += (move_x / dist) * self.speed * slow_factor * dt
@@ -46,3 +57,4 @@ class RangedEnemy(Enemy):
 
     def reset_fire_timer(self) -> None:
         self.fire_timer = self.FIRE_RATE
+        self.cast_lock_timer = 0.5  # Dừng lại 0.5s khi bắn
