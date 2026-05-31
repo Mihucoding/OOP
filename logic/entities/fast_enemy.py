@@ -14,11 +14,16 @@ class FastEnemy(Enemy):
 
     def __init__(self, x, y, hp_mult=1.0, speed_mult=1.0):
         super().__init__(x, y, hp_mult, speed_mult)
-        self.ATTACK_RANGE = 120.0
+        self.ATTACK1_RANGE = 45.0
+        self.ATTACK2_RANGE = 120.0
         self.WINDUP_DURATION = 0.5
         self.LUNGE_DURATION = 0.3
         self.LUNGE_SPEED_MULT = 3.0
-        self.COOLDOWN_DURATION = 1.2
+        self.ATTACK1_DURATION = 0.6
+        self.ATTACK1_HIT_TIME = 0.3
+        
+        self.attack2_cooldown_timer = 0.0
+        
         self.lunge_target_x = 0.0
         self.lunge_target_y = 0.0
 
@@ -45,6 +50,7 @@ class FastEnemy(Enemy):
             return
 
         self.attack_hitbox = None
+        self.attack2_cooldown_timer -= dt
         
         if self.state == 'run':
             move_x = player_x - self.x
@@ -53,7 +59,11 @@ class FastEnemy(Enemy):
             if move_len > 0:
                 self.facing_dir = 1 if move_x > 0 else -1
 
-            if move_len <= self.ATTACK_RANGE:
+            if move_len <= self.ATTACK1_RANGE:
+                self.state = 'attack1'
+                self.attack_timer = 0.0
+                self.has_hit = False
+            elif move_len <= self.ATTACK2_RANGE and self.attack2_cooldown_timer <= 0:
                 self.state = 'windup'
                 self.attack_timer = 0.0
                 self.lunge_target_x = player_x
@@ -61,6 +71,17 @@ class FastEnemy(Enemy):
             elif move_len > 0:
                 self.x += (move_x / move_len) * self.speed * slow_factor * dt
                 self.y += (move_y / move_len) * self.speed * slow_factor * dt
+                
+        elif self.state == 'attack1':
+            self.attack_timer += dt
+            if self.attack_timer >= self.ATTACK1_HIT_TIME and not self.has_hit:
+                self.has_hit = True
+                hx = self.x + self.facing_dir * 25.0
+                hy = self.y
+                self.attack_hitbox = (hx, hy, 30.0)
+            if self.attack_timer >= self.ATTACK1_DURATION:
+                self.state = 'cooldown'
+                self.cooldown_timer = 0.8
                 
         elif self.state == 'windup':
             self.attack_timer += dt
@@ -87,7 +108,8 @@ class FastEnemy(Enemy):
 
             if self.attack_timer >= self.LUNGE_DURATION:
                 self.state = 'cooldown'
-                self.cooldown_timer = self.COOLDOWN_DURATION
+                self.cooldown_timer = 1.2
+                self.attack2_cooldown_timer = 3.0 # Đợi 3s trước khi charge tiếp
                 
         elif self.state == 'cooldown':
             self.cooldown_timer -= dt

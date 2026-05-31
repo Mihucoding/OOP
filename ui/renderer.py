@@ -134,6 +134,63 @@ class Renderer:
             if frames:
                 self.ranged_animations[anim_name] = frames
 
+        # Load Fast Enemy (Bat)
+        self.fast_animations: dict[str, list[pygame.Surface]] = {}
+        fast_dir = os.path.join(root_dir, "assets", "sprites", "Fast")
+        f_sheets = {
+            "idle": "Bat-IdleFly.png",
+            "run": "Bat-Run.png",
+            "hit": "Bat-Hurt.png",
+            "die": "Bat-Die.png",
+            "attack1": "Bat-Attack1.png",
+            "attack2": "Bat-Attack2.png",
+        }
+        for anim_name, filename in f_sheets.items():
+            path = os.path.join(fast_dir, filename)
+            frames = self._slice_ranged_sheet(path)
+            if frames:
+                self.fast_animations[anim_name] = frames
+
+        # Load Tank Enemy (Golem - Tank)
+        self.tank_animations: dict[str, list[pygame.Surface]] = {}
+        tank_dir = os.path.join(root_dir, "assets", "sprites", "Tank")
+        golem_sheets = {
+            "idle": "Golem_1_idle.png",
+            "run": "Golem_1_walk.png",
+            "attack": "Golem_1_attack.png",
+            "hit": "Golem_1_hurt.png",
+            "die": "Golem_1_die.png",
+        }
+        for anim_name, filename in golem_sheets.items():
+            path = os.path.join(tank_dir, filename)
+            frames = self._slice_golem_sheet(path, scale=2.5)
+            if frames:
+                self.tank_animations[anim_name] = frames
+
+        # Load Boss (Golem - Boss)
+        self.boss_animations: dict[str, list[pygame.Surface]] = {}
+        boss_dir = os.path.join(root_dir, "assets", "sprites", "Boss")
+        for anim_name, filename in golem_sheets.items():
+            path = os.path.join(boss_dir, filename)
+            frames = self._slice_golem_sheet(path, scale=4.0)
+            if frames:
+                self.boss_animations[anim_name] = frames
+
+    def _slice_golem_sheet(self, path: str, scale: float) -> list[pygame.Surface]:
+        try:
+            sheet = pygame.image.load(path).convert_alpha()
+        except Exception:
+            return []
+        frame_w, frame_h = 90, 64
+        frame_count = sheet.get_width() // frame_w
+        frames = []
+        for i in range(frame_count):
+            rect = pygame.Rect(i * frame_w, 0, frame_w, frame_h)
+            frame = sheet.subsurface(rect).copy()
+            frame = pygame.transform.scale(frame, (int(frame_w * scale), int(frame_h * scale)))
+            frames.append(frame)
+        return frames
+
     def _slice_ranged_sheet(self, path: str) -> list[pygame.Surface]:
         try:
             sheet = pygame.image.load(path).convert_alpha()
@@ -315,43 +372,65 @@ class Renderer:
         state = getattr(enemy, 'state', 'run')
         anim_name = 'run'
         from logic.entities.ranged_enemy import RangedEnemy
+        from logic.entities.fast_enemy import FastEnemy
+        from logic.entities.tank_enemy import TankEnemy
         is_ranged = isinstance(enemy, RangedEnemy)
+        is_fast = isinstance(enemy, FastEnemy)
+        is_tank = isinstance(enemy, TankEnemy)
         
         if state == 'die':
             anim_name = 'die'
         elif getattr(enemy, 'hurt_timer', 0.0) > 0:
             anim_name = 'hit'
-        elif state == 'attack':
-            anim_name = 'attack'
-        elif state == 'cooldown' or state == 'windup' or getattr(enemy, 'cast_lock_timer', 0.0) > 0:
+        elif state == 'attack' or state == 'attack1':
+            anim_name = 'attack1' if is_fast else 'attack'
+        elif state == 'cooldown' or getattr(enemy, 'cast_lock_timer', 0.0) > 0:
             anim_name = 'idle'
+        elif state == 'windup':
+            anim_name = 'attack2' if is_fast else 'idle'
         elif state == 'lunge':
-            anim_name = 'run'
+            anim_name = 'attack2' if is_fast else 'run'
             
         # Ranged Enemy stop moving logic fallback to idle
         if is_ranged and anim_name == 'run':
             dist = math.hypot(enemy.x - cam_x, enemy.y - cam_y) # just approx
-            # Actually RangedEnemy doesn't have is_moving, but it stops when close
             if getattr(enemy, 'cast_lock_timer', 0.0) > 0:
                 anim_name = 'idle'
 
         if is_ranged:
             frames = self.ranged_animations.get(anim_name)
+        elif is_fast:
+            frames = self.fast_animations.get(anim_name)
+        elif is_tank:
+            frames = self.tank_animations.get(anim_name)
         else:
             frames = self.mushroom_animations.get(anim_name)
             
-        if (type(enemy).__name__ == "Enemy" or is_ranged) and frames:
-            # Sprite cho Enemy thường hoặc Ranged
+        if (type(enemy).__name__ == "Enemy" or is_ranged or is_fast or is_tank) and frames:
+            # Sprite cho Enemy thường, Ranged, Fast hoặc Tank
             frame_count = len(frames)
-            if state == 'die':
+            if anim_name == 'die':
                 # Chạy frame dựa trên die_timer
                 timer = getattr(enemy, 'die_timer', 0.0)
                 idx = min(frame_count - 1, int((timer / 1.2) * frame_count))
-            elif state == 'attack':
+            elif anim_name in ('hit', 'idle', 'run'):
+                # Chạy loop bình thường
+                idx = (pygame.time.get_ticks() // 80) % frame_count
+            elif state == 'attack' or state == 'attack1':
                 # Tính frame dựa trên tiến độ của attack_timer
                 timer = getattr(enemy, 'attack_timer', 0.0)
-                duration = getattr(enemy, 'ATTACK_DURATION', 0.8)
+                duration = getattr(enemy, 'ATTACK1_DURATION', 0.6) if state == 'attack1' else getattr(enemy, 'ATTACK_DURATION', 0.8)
                 idx = min(frame_count - 1, int((timer / duration) * frame_count))
+            elif state == 'windup' and is_fast:
+                timer = getattr(enemy, 'attack_timer', 0.0)
+                duration = getattr(enemy, 'WINDUP_DURATION', 0.5)
+                # Dùng 5 frame đầu (0->4)
+                idx = min(4, int((timer / duration) * 5))
+            elif state == 'lunge' and is_fast:
+                timer = getattr(enemy, 'attack_timer', 0.0)
+                duration = getattr(enemy, 'LUNGE_DURATION', 0.3)
+                # Dùng 6 frame cuối (5->10)
+                idx = 5 + min(5, int((timer / duration) * 6))
             else:
                 # Chạy loop bình thường
                 idx = (pygame.time.get_ticks() // 80) % frame_count
@@ -364,23 +443,18 @@ class Renderer:
             # Căn chỉnh để sprite chạm đất
             self.screen.blit(img, img.get_rect(midbottom=(sx, sy + self._zoom_len(20))))
         else:
-            # Fallback hình tròn cho FastEnemy, TankEnemy
+            # Fallback hình tròn cho TankEnemy
             color = getattr(enemy, 'COLOR', self.COLOR_ENEMY)
             if is_ranged: color = self.COLOR_RANGED
             radius = self._zoom_len(enemy.radius)
             pygame.draw.circle(self.screen, color, (sx, sy), radius)
             pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 2)
 
-        # Debug Hitbox đòn đánh (Chỉ bật khi dev)
-        # if getattr(enemy, 'attack_hitbox', None):
-        #     hx, hy, hr = enemy.attack_hitbox
-        #     hsx, hsy = self.world_to_screen(hx, hy, cam_x, cam_y)
-        #     pygame.draw.circle(self.screen, (255,0,0), (hsx, hsy), self._zoom_len(hr), 1)
-
         # HP bar
         hp_offset_radius = self._zoom_len(enemy.radius)
-        if type(enemy).__name__ == "Enemy" or is_ranged:
+        if type(enemy).__name__ == "Enemy" or is_ranged or is_fast or is_tank:
             hp_offset_radius += self._zoom_len(40)  # Đẩy thanh máu lên trên đỉnh đầu của Sprite
+            if is_tank: hp_offset_radius += self._zoom_len(15)
         self._draw_hp_bar(enemy, sx, sy, hp_offset_radius)
 
     def draw_boss(self, boss, cam_x, cam_y) -> None:
@@ -397,13 +471,48 @@ class Renderer:
 
         self._draw_status_halo(boss, sx, sy)
 
-        # Thân boss
-        body_color = (255, 120, 0) if boss.is_charging else self.COLOR_BOSS
-        radius = self._zoom_len(boss.radius)
-        pygame.draw.circle(self.screen, body_color, (sx, sy), radius)
-        pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 3)
+        state = getattr(boss, 'state', '')
+        anim_name = 'run'
+        if state == 'die':
+            anim_name = 'die'
+        elif getattr(boss, 'hurt_timer', 0.0) > 0:
+            anim_name = 'hit'
+        elif getattr(boss, 'aoe_active', False):
+            anim_name = 'attack'
+        elif getattr(boss, 'is_charging', False):
+            anim_name = 'run'
+        else:
+            anim_name = 'run'
+
+        frames = getattr(self, 'boss_animations', {}).get(anim_name)
+        if frames:
+            frame_count = len(frames)
+            if anim_name == 'die':
+                timer = getattr(boss, 'die_timer', 0.0)
+                idx = min(frame_count - 1, int((timer / 1.2) * frame_count))
+            elif anim_name in ('hit', 'idle', 'run'):
+                idx = (pygame.time.get_ticks() // 80) % frame_count
+            elif getattr(boss, 'aoe_active', False):
+                timer = getattr(boss, 'aoe_timer', 0.0)
+                duration = 1.5
+                idx = min(frame_count - 1, int(((duration - timer) / duration) * frame_count))
+            else:
+                idx = (pygame.time.get_ticks() // 80) % frame_count
+
+            img = self._zoom_surface(frames[idx])
+            # Hình Golem mặc định hướng trái, lật nếu facing_dir > 0
+            if getattr(boss, 'facing_dir', 1) > 0:
+                img = pygame.transform.flip(img, True, False)
+            self.screen.blit(img, img.get_rect(midbottom=(sx, sy + self._zoom_len(35))))
+        else:
+            body_color = (255, 120, 0) if boss.is_charging else self.COLOR_BOSS
+            radius = self._zoom_len(boss.radius)
+            pygame.draw.circle(self.screen, body_color, (sx, sy), radius)
+            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 3)
 
         # HP bar (to hơn)
+        radius = self._zoom_len(boss.radius)
+        if frames: radius += self._zoom_len(40) # Đẩy thanh máu lên
         self._draw_hp_bar(boss, sx, sy, radius, bar_h=8, color=(200, 0, 220))
 
     def draw_bullet(self, bullet, cam_x, cam_y) -> None:

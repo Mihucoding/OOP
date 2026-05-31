@@ -71,12 +71,35 @@ class TestEntities(unittest.TestCase):
         enemy = FastEnemy(0, 0, hp_mult=2.0, speed_mult=1.0)
         self.assertEqual(enemy.max_hp, FastEnemy.BASE_HP * 2.0)
         self.assertEqual(enemy.speed, FastEnemy.BASE_SPEED * 1.0)
+        
+        # Test Attack 1 (Close range)
+        enemy.update(0.1, 40, 0) # dist = 40 <= 45
+        self.assertEqual(enemy.state, 'attack1')
+        
+        # Test Attack 2 (Charge) - requires cooldown reset and distance > 45
+        enemy.state = 'run'
+        enemy.attack2_cooldown_timer = 0
+        enemy.update(0.1, 100, 0) # dist = 100 <= 120
+        self.assertEqual(enemy.state, 'windup')
 
     def test_tank_enemy(self):
         from logic.entities.tank_enemy import TankEnemy
         enemy = TankEnemy(0, 0, hp_mult=1.0, speed_mult=0.5)
         self.assertEqual(enemy.max_hp, TankEnemy.BASE_HP * 1.0)
         self.assertEqual(enemy.speed, TankEnemy.BASE_SPEED * 0.5)
+        
+    def test_enemy_die_logic(self):
+        enemy = Enemy(0, 0)
+        enemy.hp = 10
+        enemy.take_damage(20)
+        # It shouldn't be immediately alive=False, but state='die'
+        self.assertTrue(enemy.alive)
+        self.assertEqual(enemy.state, 'die')
+        self.assertEqual(enemy.hp, 0)
+        
+        # Update enough time to finish die animation
+        enemy.update(1.2, 0, 0)
+        self.assertFalse(enemy.alive)
 
 if __name__ == '__main__':
     unittest.main()
