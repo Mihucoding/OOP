@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+.idea/
+.vscode/
+.omc/
+tempCodeRunnerFile.py
+OOP (1)/
+CHAT_SUMMARY.md
+promt/
+.DS_Store
+**/.DS_Store
