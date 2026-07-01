@@ -32,6 +32,8 @@ from ui.screens.level_up_screen   import LevelUpScreen
 from ui.screens.game_over_screen  import GameOverScreen
 from ui.screens.win_screen        import WinScreen
 from ui.screens.rune_builder_screen import RuneBuilderScreen
+from ui.screens.skill_select_screen import SkillSelectScreen
+from ui import rune_ui_config as rune_cfg
 
 FPS            = 60
 WORLD_CENTER_X = 0.0
@@ -55,6 +57,7 @@ class GameLoop:
     MENU → PLAYING ⇄ RUNE_BUILDER → LEVEL_UP → GAME_OVER | WIN
     """
     STATE_MENU         = 'menu'
+    STATE_SKILL_SELECT = 'skill_select'  # chọn 2 hệ trước khi vào game
     STATE_PLAYING      = 'playing'
     STATE_LEVEL_UP     = 'level_up'
     STATE_RUNE_BUILDER = 'rune_builder'  # Tab → mở Rune Builder toàn màn hình
@@ -86,6 +89,7 @@ class GameLoop:
         self.gameover    = GameOverScreen(self.screen, font_big, font_small)
         self.win_scr     = WinScreen(self.screen, font_big, font_small)
         self.builder     = RuneBuilderScreen(self.screen, font_big, font_small)
+        self.skill_select = SkillSelectScreen(self.screen, font_big, font_small)
 
         self.state = self.STATE_MENU
         self._dt   = 0.0   # dt frame hiện tại (dùng cho builder timer)
@@ -119,6 +123,12 @@ class GameLoop:
             pass
 
     # ── Khởi tạo / reset ──────────────────────────────────────────────────────
+
+    def _begin_skill_select(self):
+        """Khởi tạo ván mới rồi vào màn chọn 2 hệ (trước khi Playing)."""
+        self._init_game_objects()
+        self.skill_select.reset()
+        self.state = self.STATE_SKILL_SELECT
 
     def _init_game_objects(self):
         self.player        = Player(WORLD_CENTER_X, WORLD_CENTER_Y)
@@ -250,10 +260,18 @@ class GameLoop:
         if self.state == self.STATE_MENU:
             result = self.menu.handle_event(event)
             if result == 'start':
-                self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self._begin_skill_select()
             elif result == 'quit':
                 return 'quit'
+
+        elif self.state == self.STATE_SKILL_SELECT:
+            result = self.skill_select.handle_event(event)
+            if result == 'quit':
+                return 'quit'
+            elif isinstance(result, tuple) and result[0] == 'confirm':
+                runes = [rune_cfg.make_element_rune(k) for k in result[1]]
+                self.player.setup_spells(runes)
+                self.state = self.STATE_PLAYING
 
         elif self.state == self.STATE_LEVEL_UP:
             result = self.levelup_scr.handle_event(event)
@@ -264,16 +282,14 @@ class GameLoop:
         elif self.state == self.STATE_GAME_OVER:
             result = self.gameover.handle_event(event)
             if result == 'restart':
-                self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self._begin_skill_select()
             elif result == 'quit':
                 return 'quit'
 
         elif self.state == self.STATE_WIN:
             result = self.win_scr.handle_event(event)
             if result == 'restart':
-                self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self._begin_skill_select()
             elif result == 'quit':
                 return 'quit'
 
@@ -1494,6 +1510,9 @@ class GameLoop:
     def _draw(self) -> None:
         if self.state == self.STATE_MENU:
             self.menu.draw()
+
+        elif self.state == self.STATE_SKILL_SELECT:
+            self.skill_select.draw(self._dt)
 
         elif self.state in (self.STATE_PLAYING, self.STATE_LEVEL_UP):
             self.renderer.draw_all(

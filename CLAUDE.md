@@ -22,6 +22,8 @@
 4. `Bullet` nhận `RuneTree` lúc runtime — không subclass theo loại đạn
 5. Thêm Rune mới = thêm class mới, **không sửa** `RuneComponent`, `Bullet`
 6. `RuneTree.on_hit` set tạm `bullet.element_stack` per element → mỗi element stack độc lập
+7. Chọn **2 hệ bắt buộc** đầu ván (màn `SkillSelectScreen`) → mỗi hệ = 1 chiêu; lõi slot 0 tự điền + **khóa cứng** (`RuneSlot.locked`), chỉ gắn modifier vào nhánh
+8. Tinh chỉnh UI builder/skill-select qua `ui/rune_ui_config.py` (board size, node reach, link width, element registry) — không sửa code vẽ
 
 ---
 
@@ -30,12 +32,14 @@
 | Mục | Giá trị |
 |-----|---------|
 | Element Rune | 4: FireRune, IceRune, LightningRune, WindRune |
-| Chiêu riêng | 3: Chiêu 1, Chiêu 2, Chiêu 3 |
+| Chiêu | **2** — chọn 2 hệ khác nhau đầu ván (swap Q/E), lõi khóa cứng |
 | Modifier Rune | 4: SpiralModifier, BounceModifier, SplitModifier, HasteRune |
 | Passive Rune | HasteRune (giảm cooldown chiêu) |
-| Rune slots | Slot 0 (Hệ chính, element) + L1/L2/R1/R2 (modifier) |
+| Rune slots | Slot 0 (Hệ chính, element — khóa) + L1/L2/R1/R2 (modifier) |
 | Same-element stack | Cùng element với Slot 0 có thể vào nhánh → tăng element_stack |
-| Rune Builder | Tab → [Inventory]/[Chỉ số] + Chiêu 1/2/3 + Tree Canvas |
+| Chọn hệ | `SkillSelectScreen` sau Main Menu — bắt buộc 2 hệ khác nhau |
+| Config UI | `ui/rune_ui_config.py` — board/node/link/element registry |
+| Rune Builder | Tab → [Ability panel] + selector 2 crystal (Q/E) + Tree Canvas |
 | Lên cấp | 3 card mix Rune + StatUpgrade (tỉ lệ theo wave) |
 | StatUpgrade rarity | 5 bậc: Common/Uncommon/Rare/Epic/Legendary (trọng số 50/28/15/6/1%) |
 | Player stats | HP, Speed, Damage, Armor, HPRegen, Lucky, CDR, XPRange |
@@ -124,6 +128,12 @@
 | 2026-05-20 | Ultimate từ Slot 0 element | Tận dụng element đã chọn, có ý nghĩa |
 | 2026-05-20 | Dash = Space, MovementAbility base | Mở rộng Blink/GhostStep sau |
 | 2026-05-20 | Stats panel trong Rune Builder | Player thấy chỉ số ngay trong builder |
+| 2026-07-01 | UI builder theo phong cách Watcher's Heart | Board lục giác dày, mũi tên, animation morph, icon sprite |
+| 2026-07-01 | Chọn 2 hệ đầu ván (SkillSelectScreen) | Mỗi hệ = 1 chiêu, lõi khóa cứng; element bắt buộc |
+| 2026-07-01 | 3 chiêu → 2 chiêu | Khớp mô hình chọn-2-hệ, swap Q/E |
+| 2026-07-01 | `ui/rune_ui_config.py` | Config-driven: chỉnh board/node/link/element 1 nơi |
+| 2026-07-01 | Board + node/nối supersample smoothscale | Anti-alias cho nét mịn, viền mảnh + glow mềm |
+| 2026-07-01 | Cấu trúc slot per-element (Fire 5 mod/3 nhánh) | `slot_defs_for_rune()`; các hệ khác giữ 4 mod/2 nhánh |
 
 ---
 

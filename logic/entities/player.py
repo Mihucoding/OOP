@@ -6,11 +6,11 @@ class SpellBuild:
 
     BASE_FIRE_RATE = 0.5   # giây giữa 2 lần bắn mặc định
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, slot_defs=None):
         from logic.rune.rune_slots import RuneSlots
 
         self.name       = name
-        self.rune_slots = RuneSlots()
+        self.rune_slots = RuneSlots(slot_defs)
         self.rune_tree  = self.rune_slots.build_rune_tree()
         self.fire_timer = 0.0        # giây còn lại trước khi bắn được
         self.fire_rate  = self.BASE_FIRE_RATE  # có thể bị ảnh hưởng bởi HasteRune
@@ -92,12 +92,12 @@ class Player:
         from logic.abilities.movement.dash_ability import DashAbility
         self.movement_ability = DashAbility()
 
-        # Rune Builder system: 3 chiêu riêng, mỗi chiêu có cây rune riêng.
+        # Rune Builder system: mỗi chiêu = 1 hệ (element ở lõi, khóa cứng).
+        # Số chiêu mặc định = 2, gán hệ qua setup_spells() sau khi chọn đầu ván.
         self.rune_inventory: list = []   # Rune chưa đặt vào cây
         self.spells = [
             SpellBuild("Spell 1"),
             SpellBuild("Spell 2"),
-            SpellBuild("Spell 3"),
         ]
         self.active_spell_index = 0
 
@@ -237,6 +237,21 @@ class Player:
         """Thêm rune vào inventory (chưa đặt vào cây)."""
         self.rune_inventory.append(rune)
         self.has_new_rune = True
+
+    def setup_spells(self, element_runes: list) -> None:
+        """Khởi tạo các chiêu theo danh sách ElementRune đã chọn đầu ván.
+
+        Mỗi chiêu nhận 1 element vào lõi (slot 0) và khóa cứng — người chơi chỉ
+        gắn modifier vào nhánh, không đổi hệ trong builder.
+        """
+        from logic.rune.rune_slots import slot_defs_for_rune
+        self.spells = []
+        for i, rune in enumerate(element_runes):
+            sb = SpellBuild(f"Spell {i + 1}", slot_defs=slot_defs_for_rune(rune))
+            sb.rune_slots.set_core(rune)
+            sb.rebuild_rune_tree()
+            self.spells.append(sb)
+        self.active_spell_index = 0
 
     def get_active_spell(self) -> SpellBuild:
         return self.spells[self.active_spell_index]

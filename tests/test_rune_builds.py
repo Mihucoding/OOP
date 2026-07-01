@@ -130,11 +130,11 @@ class TestRuneTreeBehavior(unittest.TestCase):
 
 
 class TestPlayerSpells(unittest.TestCase):
-    """Kiểm tra 3 chiêu độc lập của Player."""
+    """Kiểm tra 2 chiêu độc lập của Player (mô hình chọn 2 hệ)."""
 
-    def test_player_has_three_independent_spells(self):
+    def test_player_has_two_independent_spells(self):
         player = Player()
-        self.assertEqual(len(player.spells), 3)
+        self.assertEqual(len(player.spells), 2)
 
         player.spells[0].rune_slots.place(1, SpiralModifier())
         player.spells[1].rune_slots.place(1, BounceModifier())
@@ -142,10 +142,24 @@ class TestPlayerSpells(unittest.TestCase):
 
         self.assertEqual(len(player.spells[0].rune_tree.modifiers), 1)
         self.assertEqual(len(player.spells[1].rune_tree.modifiers), 1)
-        self.assertEqual(len(player.spells[2].rune_tree.modifiers), 0)
 
         player.set_active_spell(1)
         self.assertIs(player.rune_tree, player.spells[1].rune_tree)
+
+    def test_setup_spells_assigns_locked_core(self):
+        player = Player()
+        player.setup_spells([FireRune(), IceRune()])
+        self.assertEqual(len(player.spells), 2)
+        for spell in player.spells:
+            core = spell.rune_slots.get(0)
+            self.assertIsNotNone(core.rune)
+            self.assertTrue(core.locked)
+        # Lõi đã khóa: không đổi/không gỡ được
+        fire_spell = player.spells[0]
+        self.assertFalse(fire_spell.rune_slots.can_place(0, IceRune()))
+        self.assertIsNone(fire_spell.rune_slots.remove(0))
+        self.assertIsNone(fire_spell.rune_slots.swap(0, IceRune()))
+        self.assertIsNotNone(fire_spell.rune_slots.get(0).rune)
 
 
 class TestSameElementStacking(unittest.TestCase):

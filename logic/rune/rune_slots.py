@@ -18,13 +18,81 @@ from logic.rune.rune_component import ElementRune, ModifierRune
 from logic.rune.rune_tree import RuneTree
 
 # (id, parent_id, slot_type, abs_x, abs_y)
+# Vị trí (x,y) chỉ là placeholder — builder tự đặt lại theo layout từng hệ.
+#
+# Mặc định: 4 modifier / 2 nhánh
+#             [0]
+#            /    \
+#          [1]    [2]
+#           |      |
+#          [3]    [4]
 SLOT_DEFS = [
-    (0,  None, 'element',   760,  150),  # Hệ chính — optional ElementRune
+    (0,  None, 'element',   760,  150),  # Hệ chính — ElementRune (khóa)
     (1,  0,    'modifier',  560,  310),  # L1
     (2,  0,    'modifier',  960,  310),  # R1
-    (3,  1,    'modifier',  560,  500),  # L2
-    (4,  2,    'modifier',  960,  500),  # R2
+    (3,  1,    'modifier',  560,  500),  # L2 (con L1)
+    (4,  2,    'modifier',  960,  500),  # R2 (con R1)
 ]
+
+# Fire: 5 modifier / 3 nhánh (trái leaf · giữa 2 · phải 2)
+#              [0]
+#           /   |   \
+#         [1]  [2]  [3]
+#               |    |
+#              [4]  [5]
+# Vị trí (x,y) chỉ placeholder — builder đặt lại theo layout xéo từng hệ.
+# Fire: core@0; 1@1→0; 2@2→0; 3@4→0; 4@9→3(điểm4)  → 4 modifier
+SLOT_DEFS_FIRE = [
+    (0, None, 'element',  760, 150),
+    (1, 0,    'modifier', 600, 330),
+    (2, 0,    'modifier', 920, 330),
+    (3, 0,    'modifier', 760, 330),
+    (4, 3,    'modifier', 760, 510),
+]
+# Ice: core@0; 1@4→0; 2@9→1; 3@11→2; 4@7→1; 5@12→4
+SLOT_DEFS_ICE = [
+    (0, None, 'element',  760, 150),
+    (1, 0,    'modifier', 760, 300),
+    (2, 1,    'modifier', 760, 400),
+    (3, 2,    'modifier', 600, 500),
+    (4, 1,    'modifier', 900, 400),
+    (5, 4,    'modifier', 900, 500),
+]
+# Wind: core@0; 1@4→0; 2@9→1; 3@6→1; 4@14→2; 5@12→2
+SLOT_DEFS_WIND = [
+    (0, None, 'element',  760, 150),
+    (1, 0,    'modifier', 760, 300),
+    (2, 1,    'modifier', 760, 400),
+    (3, 1,    'modifier', 600, 400),
+    (4, 2,    'modifier', 700, 520),
+    (5, 2,    'modifier', 860, 520),
+]
+# Lightning: core@0; 1@1→0; 2@6→1; 3@2→0; 4@4→3; 5@7→3
+SLOT_DEFS_LIGHTNING = [
+    (0, None, 'element',  760, 150),
+    (1, 0,    'modifier', 600, 340),
+    (2, 1,    'modifier', 540, 480),
+    (3, 0,    'modifier', 920, 340),
+    (4, 3,    'modifier', 860, 480),
+    (5, 3,    'modifier', 980, 480),
+]
+
+
+def slot_defs_for_rune(rune):
+    """Chọn cấu trúc slot theo hệ — mỗi hệ có cây riêng (5 modifier / 3 tầng)."""
+    from logic.rune.elements.fire_rune import FireRune
+    from logic.rune.elements.ice_rune import IceRune
+    from logic.rune.elements.wind_rune import WindRune
+    from logic.rune.elements.lightning_rune import LightningRune
+    if isinstance(rune, FireRune):
+        return SLOT_DEFS_FIRE
+    if isinstance(rune, IceRune):
+        return SLOT_DEFS_ICE
+    if isinstance(rune, WindRune):
+        return SLOT_DEFS_WIND
+    if isinstance(rune, LightningRune):
+        return SLOT_DEFS_LIGHTNING
+    return SLOT_DEFS
 
 
 class RuneSlot:
@@ -37,6 +105,7 @@ class RuneSlot:
         self.x         = x
         self.y         = y
         self.rune      = None
+        self.locked    = False       # lõi hệ chính: khóa cứng, không đổi trong builder
 
     def is_empty(self) -> bool: return self.rune is None
 
@@ -53,10 +122,11 @@ class RuneSlots:
 
     NODE_RADIUS = 38
 
-    def __init__(self):
+    def __init__(self, slot_defs=None):
+        defs = slot_defs if slot_defs is not None else SLOT_DEFS
         self.slots: list[RuneSlot] = [
             RuneSlot(sid, pid, stype, x, y)
-            for sid, pid, stype, x, y in SLOT_DEFS
+            for sid, pid, stype, x, y in defs
         ]
 
     def get(self, slot_id: int) -> RuneSlot:
@@ -64,8 +134,16 @@ class RuneSlots:
 
     # ── Kiểm tra ──────────────────────────────────────────────────────────────
 
+    def set_core(self, rune) -> None:
+        """Gán element vào lõi (slot 0) và khóa cứng — dùng khi chọn hệ đầu ván."""
+        slot0 = self.get(0)
+        slot0.rune   = rune
+        slot0.locked = True
+
     def can_place(self, slot_id: int, rune) -> bool:
         slot = self.get(slot_id)
+        if slot.locked:
+            return False
         if not slot.is_empty():
             return False
         # Parent check: Slot 3/4 cần Slot 1/2 có rune
@@ -106,13 +184,17 @@ class RuneSlots:
         return True
 
     def remove(self, slot_id: int):
-        slot      = self.get(slot_id)
+        slot = self.get(slot_id)
+        if slot.locked:
+            return None
         old_rune  = slot.rune
         slot.rune = None
         return old_rune
 
     def swap(self, slot_id: int, incoming_rune):
         slot = self.get(slot_id)
+        if slot.locked:
+            return None
         # Kiểm tra type bằng cùng logic can_place (không cần slot trống)
         accepts = slot.can_accept(incoming_rune)
         if not accepts and slot.slot_type == 'modifier' and isinstance(incoming_rune, ElementRune):
