@@ -27,11 +27,6 @@ class MovementAbility:
     def reset(self) -> None:
         self.timer = self.COOLDOWN
 
-    @property
-    def cooldown_ratio(self) -> float:
-        """0.0 = sẵn sàng, 1.0 = vừa dùng xong."""
-        return min(1.0, self.timer / self.COOLDOWN)
-
 
 class DashAbility(MovementAbility):
     """

@@ -64,6 +64,8 @@ class Renderer:
         self._load_player_animations()
         self._load_effect_animations()
         self._load_enemy_animations()
+        self.wind_projectile_frames: list[pygame.Surface] = []
+        self._load_wind_sprites()
         try:
             from ui.tiled_map import DEFAULT_MAP_FILE, TiledMap
             root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -160,6 +162,37 @@ class Renderer:
                 self.meat_sprite = pygame.image.load(meat_path).convert_alpha()
             except Exception:
                 pass
+
+    def _load_wind_sprites(self) -> None:
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wind_dir = os.path.join(root_dir, "assets", "sprites", "Wind Effect 01")
+        proj_path = os.path.join(wind_dir, "Wind Projectile.png")
+        self.wind_projectile_frames = self._slice_wind_sheet(proj_path)
+        hit_path = os.path.join(wind_dir, "Wind Hit Effect.png")
+        hit_frames = self._slice_wind_sheet(hit_path, display_size=(72, 72))
+        if hit_frames:
+            self.effect_animations['wind_hit'] = hit_frames
+
+    def _slice_wind_sheet(self, path: str, display_size: tuple | None = None) -> list[pygame.Surface]:
+        try:
+            sheet = pygame.image.load(path).convert_alpha()
+        except Exception:
+            return []
+        w, h = sheet.get_width(), sheet.get_height()
+        for frame_size in (32, 48, 64, 96, 128):
+            if h % frame_size == 0 and w % frame_size == 0:
+                cols = w // frame_size
+                rows = h // frame_size
+                frames = []
+                for row in range(rows):
+                    for col in range(cols):
+                        rect = pygame.Rect(col * frame_size, row * frame_size, frame_size, frame_size)
+                        frame = sheet.subsurface(rect).copy()
+                        if display_size:
+                            frame = pygame.transform.scale(frame, display_size)
+                        frames.append(frame)
+                return frames
+        return [sheet]
 
     def _load_enemy_animations(self) -> None:
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -731,7 +764,7 @@ class Renderer:
         visual_type = getattr(bullet, 'visual_type', 'circle')
         is_crit     = getattr(bullet, 'is_crit', False)
 
-        sprite_key = {'blood_ball': 'blood_fly', 'fire_bolt': 'fire_bolt'}
+        sprite_key = {'fire_bolt': 'fire_bolt'}
         if visual_type in sprite_key:
             anim = self._bullet_pool.update_and_get(bullet, dt)
             if anim:
@@ -743,9 +776,38 @@ class Renderer:
                 rotated = pygame.transform.rotate(scaled, angle)
                 self.screen.blit(rotated, rotated.get_rect(center=(sx, sy)))
                 if is_crit:
-                    glow = (220, 0, 30) if visual_type == 'blood_ball' else (255, 180, 40)
-                    pygame.draw.circle(self.screen, glow, (sx, sy), self._zoom_len(9), 2)
+                    pygame.draw.circle(self.screen, (255, 180, 40), (sx, sy), self._zoom_len(9), 2)
                 return
+
+        if visual_type == 'wind_boomerang':
+            # Glow halo để phân biệt với nền đất
+            glow_r = self._zoom_len(24)
+            glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (140, 255, 180, 110), (glow_r, glow_r), glow_r)
+            pygame.draw.circle(glow_surf, (200, 255, 220, 60),  (glow_r, glow_r), glow_r // 2)
+            self.screen.blit(glow_surf, glow_surf.get_rect(center=(sx, sy)))
+
+            frames = getattr(self, 'wind_projectile_frames', [])
+            if frames:
+                frame_idx = (pygame.time.get_ticks() // 80) % len(frames)
+                frame = frames[frame_idx]
+                size = self._zoom_len(38)
+                scaled = pygame.transform.scale(frame, (size, size))
+                angle = math.degrees(math.atan2(-bullet.vy, bullet.vx))
+                spin  = getattr(bullet, 'spin_angle', 0.0)
+                rotated = pygame.transform.rotate(scaled, angle + spin)
+                self.screen.blit(rotated, rotated.get_rect(center=(sx, sy)))
+            else:
+                pygame.draw.circle(self.screen, (140, 255, 180), (sx, sy),
+                                   self._zoom_len(bullet.radius))
+            if is_crit:
+                pygame.draw.circle(self.screen, (200, 255, 200), (sx, sy),
+                                   self._zoom_len(16), 2)
+            return
+
+        if visual_type == 'sword_beam':
+            self._draw_sword_blade(bullet, sx, sy, cam_x, cam_y, is_crit)
+            return
 
         colors = {
             'circle': (255, 255, 100),
@@ -762,6 +824,60 @@ class Renderer:
         elif visual_type in ('fire_ball', 'wind_ball'):
             ring = (255, 200, 50) if visual_type == 'fire_ball' else (200, 240, 255)
             pygame.draw.circle(self.screen, ring, (sx, sy), radius + self._zoom_len(2), 1)
+
+    def _draw_sword_blade(self, bullet, sx, sy, cam_x, cam_y, is_crit) -> None:
+        """Flash of Swords — 1 lưỡi kiếm MẢNH kiểu pixel: gốc mọc ra từ NGUỒN
+        (viên đạn / điểm cuối tia, bullet.player_x/player_y), thân hơi cong,
+        THUÔN NHỌN dần về mũi (không có đầu tròn). Mũi = vị trí bullet hiện tại
+        (sx, sy) đang quét quanh nguồn."""
+        ox = getattr(bullet, 'player_x', bullet.x)
+        oy = getattr(bullet, 'player_y', bullet.y)
+        bx, by = self.world_to_screen(ox, oy, cam_x, cam_y)   # gốc kiếm (ở đạn/nguồn)
+        tx, ty = sx, sy                                       # mũi kiếm
+        dx, dy = tx - bx, ty - by
+        length = math.hypot(dx, dy)
+        if length < 2:
+            return
+        ux, uy = dx / length, dy / length     # dọc theo lưỡi
+        px, py = -uy, ux                       # vuông góc lưỡi
+
+        blade_color = (255, 232, 150) if is_crit else (196, 230, 255)
+        core_color  = (255, 255, 225) if is_crit else (240, 250, 255)
+        glow_color  = (255, 210, 90)  if is_crit else (150, 205, 255)
+        half_w = max(1.5, self._zoom_len(2.6))   # bề rộng NỬA lưỡi — mảnh
+        curve  = self._zoom_len(5.0)             # độ cong nhẹ của lưỡi
+        N = 12
+
+        # Dựng 2 mép lưỡi: rộng nhất ~giữa, thon nhọn dần về 2 đầu (mũi = điểm).
+        left, right, spine = [], [], []
+        for i in range(N + 1):
+            t = i / N
+            w   = half_w * (math.sin(math.pi * t) ** 0.65)   # thon 2 đầu
+            bow = curve * math.sin(math.pi * t)              # cong 1 phía
+            cxp = bx + ux * (length * t) + px * bow
+            cyp = by + uy * (length * t) + py * bow
+            spine.append((cxp, cyp))
+            left.append((cxp + px * w, cyp + py * w))
+            right.append((cxp - px * w, cyp - py * w))
+        poly = left + right[::-1]
+
+        # Quầng sáng mờ quanh lưỡi (vẽ trên surface cục bộ theo bbox lưỡi).
+        xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+        pad = int(self._zoom_len(6)) + 2
+        minx, miny = int(min(xs)) - pad, int(min(ys)) - pad
+        w_s = int(max(xs)) + pad - minx
+        h_s = int(max(ys)) + pad - miny
+        if 0 < w_s < 400 and 0 < h_s < 400:
+            glow = pygame.Surface((w_s, h_s), pygame.SRCALPHA)
+            pygame.draw.line(glow, (*glow_color, 70), (bx - minx, by - miny),
+                             (tx - minx, ty - miny), max(3, self._zoom_len(6)))
+            self.screen.blit(glow, (minx, miny))
+
+        # Thân lưỡi + gân sáng giữa (không đầu tròn).
+        pygame.draw.polygon(self.screen, blade_color, poly)
+        if len(spine) >= 2:
+            pygame.draw.lines(self.screen, core_color, False, spine,
+                              max(1, self._zoom_len(1)))
 
     def draw_enemy_bullet(self, eb, cam_x, cam_y) -> None:
         sx, sy = self.world_to_screen(eb.x, eb.y, cam_x, cam_y)
@@ -981,6 +1097,8 @@ class Renderer:
             self._draw_directional_sprite_effect(effect, cam_x, cam_y, dt, 'air_burst')
         elif vt == 'fire_breath_jet':
             self._draw_fire_jet(effect, cam_x, cam_y, dt)
+        elif vt == 'wind_vortex':
+            self._draw_vortex_zone(effect, cam_x, cam_y)
 
     def _draw_center_sprite_effect(self, effect, cam_x, cam_y, dt: float,
                                    key: str, aoe: bool = False) -> None:
@@ -1053,6 +1171,40 @@ class Renderer:
         rotated = pygame.transform.rotate(scaled, -math.degrees(angle))
         self.screen.blit(rotated, rotated.get_rect(center=(int(cx), int(cy))))
 
+    def _draw_vortex_zone(self, effect, cam_x, cam_y) -> None:
+        """Cơn lốc Perfect Storm — vòng tròn mờ đánh dấu vùng hút + các vệt
+        gió xoáy quay quanh tâm. Tâm dùng effect.x/effect.y HIỆN TẠI (không
+        phải điểm cast gốc) vì VortexZone tự lượn qua lại mỗi frame."""
+        sx, sy = self.world_to_screen(effect.x, effect.y, cam_x, cam_y)
+        radius = self._zoom_len(effect.AoE_RADIUS)
+        if radius < 1:
+            return
+        color = (120, 230, 150)
+
+        grow = min(1.0, effect.elapsed / max(0.001, effect.GROW_DUR))
+        t = effect.anim_progress
+        fade_from = 0.7
+        fade = 1.0 if t < fade_from else max(0.0, 1.0 - (t - fade_from) / (1.0 - fade_from))
+        r = max(1, int(radius * grow))
+
+        ring = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
+        pygame.draw.circle(ring, (*color, int(140 * fade)), (r + 4, r + 4), r, 3)
+        self.screen.blit(ring, (sx - r - 4, sy - r - 4))
+
+        # 3 vệt xoáy, mỗi vệt 4 chấm cuộn dần vào tâm — bán quay riêng biệt
+        # với chuyển động lượn qua lại của cả vùng (spin nhanh hơn hẳn).
+        spin = effect.elapsed * 3.0
+        for i in range(3):
+            base_ang = spin + i * (math.tau / 3)
+            for k in range(4):
+                frac = (k + 1) / 5.0
+                wr = r * frac * grow
+                ang = base_ang + frac * 2.4
+                wx = sx + math.cos(ang) * wr
+                wy = sy + math.sin(ang) * wr
+                dot_r = max(1, self._zoom_len(3 * (1.0 - frac * 0.5)))
+                pygame.draw.circle(self.screen, color, (int(wx), int(wy)), dot_r)
+
     def draw_wind_charge(self, player, ratio: float, cam_x, cam_y) -> None:
         ratio = max(0.0, min(1.0, ratio))
         sx, sy = self.world_to_screen(player.x, player.y, cam_x, cam_y)
@@ -1087,7 +1239,7 @@ class Renderer:
         target_h = max(4, self._zoom_len(78.0))
 
         # 1. Tạo dải băng thẳng đã có sẵn animation trồi lên theo thời gian (age)
-        tiled_surf = self._tile_ice_spike_frames(frames, int(arc_len), target_h, effect.get('age', 0.0))
+        tiled_surf, _pad = self._tile_ice_spike_frames(frames, int(arc_len), target_h, effect.get('age', 0.0))
         
         # 2. Bẻ cong dải băng thành cung tròn bao quanh nhân vật
         start_angle = effect['aim_angle'] - arc_length_rad / 2
@@ -1125,13 +1277,18 @@ class Renderer:
         dy = ey - sy
         length = max(1, int(math.hypot(dx, dy)))
         height = self._zoom_len(effect.get('width', 90))
-        img = self._tile_ice_spike_frames(frames, length, height, effect.get('age', 0.0))
+        img, pad = self._tile_ice_spike_frames(frames, length, height, effect.get('age', 0.0))
         angle = -math.degrees(math.atan2(dy, dx))
         if dx < 0:
             img = pygame.transform.flip(img, True, False)
             angle += 180
         img = pygame.transform.rotate(img, angle)
-        rect = img.get_rect(center=((sx + ex) // 2, (sy + ey) // 2))
+        # Canvas dài thêm `pad` về phía đầu mút → dời tâm nửa pad theo hướng bắn
+        # để gốc spike vẫn nằm đúng ở người (không lệch về sau).
+        ux, uy = dx / length, dy / length
+        cx = (sx + ex) / 2 + ux * pad / 2
+        cy = (sy + ey) / 2 + uy * pad / 2
+        rect = img.get_rect(center=(int(cx), int(cy)))
         self.screen.blit(img, rect)
 
     def _tile_ice_spike_frames(
@@ -1140,16 +1297,16 @@ class Renderer:
         length: int,
         height: int,
         age: float,
-    ) -> pygame.Surface:
+    ) -> tuple[pygame.Surface, int]:
         if length <= 0 or height <= 0:
-            return pygame.Surface((1, 1), pygame.SRCALPHA)
+            return pygame.Surface((1, 1), pygame.SRCALPHA), 0
         if not frames:
-            return pygame.Surface((length, height), pygame.SRCALPHA)
+            return pygame.Surface((length, height), pygame.SRCALPHA), 0
 
         bounds_list = [frame.get_bounding_rect() for frame in frames]
         valid_bounds = [bounds for bounds in bounds_list if bounds.width > 0 and bounds.height > 0]
         if not valid_bounds:
-            return pygame.Surface((length, height), pygame.SRCALPHA)
+            return pygame.Surface((length, height), pygame.SRCALPHA), 0
 
         max_bounds_w = max(bounds.width for bounds in valid_bounds)
         scale = height / max(1, frames[0].get_height())
@@ -1158,7 +1315,9 @@ class Renderer:
         chunk_delay = 0.045
         chunk_anim = 0.30
         chunk_fade = 0.16
-        canvas = pygame.Surface((length, height), pygame.SRCALPHA)
+        # Vùng đệm cuối canvas để segment chót vẽ TRỌN (không bị cắt phẳng ở đầu mút)
+        pad = base_segment_w + 2
+        canvas = pygame.Surface((length + pad, height), pygame.SRCALPHA)
 
         x = 0
         chunk_idx = 0
@@ -1186,12 +1345,11 @@ class Renderer:
                 alpha = max(0, min(255, int(255 * (1.0 - (local_age - chunk_anim) / chunk_fade))))
                 segment.set_alpha(alpha)
 
-            remaining = max(0, length - x)
-            area = pygame.Rect(0, 0, min(segment_w, remaining), height)
-            canvas.blit(segment, (x, 0), area)
+            # Blit trọn segment (canvas đã có vùng đệm `pad` nên không bị cắt)
+            canvas.blit(segment, (x, 0))
             x += advance
             chunk_idx += 1
-        return canvas
+        return canvas, pad
 
     def _draw_beam_effect(
         self,

@@ -75,7 +75,6 @@
 - `logic/rune/elements/ice_rune.py`
 - `logic/rune/elements/lightning_rune.py`
 - `logic/rune/elements/wind_rune.py`
-- `logic/rune/elements/poison_rune.py` (không trong pool)
 - `logic/rune/modifiers/spiral_modifier.py`
 - `logic/rune/modifiers/bounce_modifier.py`
 - `logic/rune/modifiers/split_modifier.py`

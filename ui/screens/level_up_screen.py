@@ -69,8 +69,10 @@ class LevelUpScreen:
         # Viền
         pygame.draw.rect(self.screen, (r, g, b), rect, 3, border_radius=10)
 
-        # Badge loại
-        badge_surf = self.font_small.render("RUNE", True, (r, g, b))
+        # Badge loại — phân biệt MODIFIER vs TRIGGER
+        kind = rune.get_rune_kind() if hasattr(rune, 'get_rune_kind') else 'modifier'
+        badge_txt = {'trigger': "TRIGGER", 'element': "ELEMENT"}.get(kind, "MODIFIER")
+        badge_surf = self.font_small.render(badge_txt, True, (r, g, b))
         self.screen.blit(badge_surf, (rect.x + 10, rect.y + 10))
 
         # Số phím
@@ -89,15 +91,20 @@ class LevelUpScreen:
         self.screen.blit(name_surf, name_surf.get_rect(
             centerx=rect.centerx, y=rect.y + 142))
 
-        # Mô tả
-        desc = rune.get_description()
-        desc_surf = self.font_small.render(desc, True, (210, 210, 210))
-        if desc_surf.get_width() > rect.w - 16:
-            ratio     = (rect.w - 16) / desc_surf.get_width()
-            desc_surf = pygame.transform.smoothscale(
-                desc_surf, (rect.w - 16, int(desc_surf.get_height() * ratio)))
-        self.screen.blit(desc_surf, desc_surf.get_rect(
-            centerx=rect.centerx, y=rect.y + 178))
+        # Mô tả — dạng thẻ: 1 dòng tóm tắt + các dòng bullet ◆ (canh trái, mỗi
+        # dòng riêng theo \n trong get_description).
+        line_y = rect.y + 172
+        for line in rune.get_description().split('\n'):
+            if not line:
+                line_y += 10
+                continue
+            ls = self.font_small.render(line, True, (210, 210, 210))
+            if ls.get_width() > rect.w - 20:
+                ratio = (rect.w - 20) / ls.get_width()
+                ls = pygame.transform.smoothscale(
+                    ls, (rect.w - 20, int(ls.get_height() * ratio)))
+            self.screen.blit(ls, (rect.x + 12, line_y))
+            line_y += 19
 
     # ── Stat card ──────────────────────────────────────────────────────────────
 

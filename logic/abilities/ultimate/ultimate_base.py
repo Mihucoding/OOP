@@ -65,11 +65,8 @@ def get_ultimate_for_spell(spell) -> UltimateAbility:
     from logic.rune.elements.ice_rune       import IceRune
     from logic.rune.elements.lightning_rune import LightningRune
     from logic.rune.elements.wind_rune      import WindRune
-    from logic.abilities.ultimate.fire_nova        import FireNova
-    from logic.abilities.ultimate.ice_blizzard     import IceBlizzard
-    from logic.abilities.ultimate.lightning_storm  import LightningStorm
-    from logic.abilities.ultimate.wind_cyclone     import WindCyclone
-    from logic.abilities.ultimate.shadow_nova      import ShadowNova
+    from logic.abilities.ultimate.ultimates import (
+        FireNova, IceBlizzard, LightningStorm, WindCyclone, ShadowNova)
 
     slot0_rune = spell.rune_slots.get(0).rune
     if isinstance(slot0_rune, FireRune):      return FireNova()

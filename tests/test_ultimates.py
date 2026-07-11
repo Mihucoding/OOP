@@ -1,9 +1,6 @@
 import unittest
-from logic.abilities.ultimate.fire_nova       import FireNova
-from logic.abilities.ultimate.ice_blizzard    import IceBlizzard
-from logic.abilities.ultimate.lightning_storm import LightningStorm
-from logic.abilities.ultimate.wind_cyclone    import WindCyclone
-from logic.abilities.ultimate.shadow_nova     import ShadowNova
+from logic.abilities.ultimate.ultimates import (
+    FireNova, IceBlizzard, LightningStorm, WindCyclone, ShadowNova)
 from logic.entities.enemy  import Enemy
 from logic.entities.player import Player
 

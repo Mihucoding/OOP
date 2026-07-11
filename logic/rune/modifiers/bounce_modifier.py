@@ -1,7 +1,6 @@
 import math
 from logic.rune.rune_component import ModifierRune
 
-
 class BounceModifier(ModifierRune):
     """
     Rune Nảy — đạn trúng quái rồi nảy sang quái gần nhất.
@@ -9,10 +8,7 @@ class BounceModifier(ModifierRune):
     """
     MAX_BOUNCE = 2
     BOUNCE_SPEED = 420.0
-
-    def __init__(self):
-        super().__init__()
-        self.stack = 1
+    POINT_COST = 2   # nhân rộng sát thương qua nhiều địch — mạnh, tốn điểm hơn
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
         bounce_max = self.MAX_BOUNCE * self.stack
@@ -41,7 +37,7 @@ class BounceModifier(ModifierRune):
                 )
                 bullet.bounce_count += 1
 
-    def on_update(self, bullet, dt: float) -> None:
+    def on_update(self, bullet, dt: float, context: dict = None) -> None:
         # Sau khi redirect, bullet.bounce_redirect = True → game loop không kill
         # Sau 1 frame, bounce_redirect được reset trong bullet.on_hit
         pass
@@ -50,5 +46,6 @@ class BounceModifier(ModifierRune):
         return []
 
     def get_display_name(self) -> str: return "Bounce Rune"
-    def get_description(self) -> str: return f"Bullets bounce up to {self.MAX_BOUNCE} times"
+    def get_description(self) -> str:
+        return f"Bullets bounce up to {self.MAX_BOUNCE} times (Cost: {self.POINT_COST})"
     def get_color(self) -> tuple: return (255, 220, 50)

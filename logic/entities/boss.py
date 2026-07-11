@@ -38,6 +38,7 @@ class Boss(Enemy):
         self.is_charging = False
         self.charge_target_x = 0.0
         self.charge_target_y = 0.0
+        self._charge_hit_dealt = False   # mỗi lượt charge chỉ gây CHARGE_DAMAGE đúng 1 lần
 
         # AoE state
         self.aoe_cooldown_timer = 8.0
@@ -101,6 +102,7 @@ class Boss(Enemy):
                 self.charge_timer = Boss.CHARGE_DURATION
                 self.charge_target_x = px
                 self.charge_target_y = py
+                self._charge_hit_dealt = False   # lượt charge mới → cho phép gây dame lại
             else:
                 move_x = px - self.x
                 move_y = py - self.y
@@ -143,10 +145,14 @@ class Boss(Enemy):
 
     def check_charge_hit(self, player_x: float, player_y: float,
                          player_radius: float) -> float:
-        # Nếu đang charge và khoảng cách <= radius+player_radius
-        # Trả về damage (ví dụ 30), ngược lại 0
-        if self.is_charging:
+        """Cú đấm charge — gây CHARGE_DAMAGE đúng 1 LẦN mỗi lượt charge (không
+        cộng dồn theo frame như dame chạm thường), đúng kiểu 'bị húc' 1 cú
+        nặng thay vì bị cà liên tục. _charge_hit_dealt reset về False mỗi khi
+        1 lượt charge MỚI bắt đầu (xem _update_charge)."""
+        if self.is_charging and not self._charge_hit_dealt:
             dist = math.hypot(player_x - self.x, player_y - self.y)
             if dist <= Boss.RADIUS + player_radius:
+                self._charge_hit_dealt = True
                 return Boss.CHARGE_DAMAGE
         return 0.0
+

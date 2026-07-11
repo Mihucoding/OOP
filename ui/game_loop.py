@@ -9,8 +9,9 @@ from logic.entities.ranged_enemy import RangedEnemy
 from logic.entities.fast_enemy   import FastEnemy
 from logic.entities.tank_enemy   import TankEnemy
 from logic.entities.boss         import Boss
-from logic.entities.bullet       import Bullet
-from logic.entities.enemy_bullet import EnemyBullet
+from logic.entities.bullet          import Bullet
+from logic.entities.wind_boomerang  import WindBoomerang
+from logic.entities.enemy_bullet    import EnemyBullet
 from logic.entities.attack_effect import (
     AirBurstEffect,
     AoEBurst,
@@ -32,6 +33,8 @@ from ui.screens.level_up_screen   import LevelUpScreen
 from ui.screens.game_over_screen  import GameOverScreen
 from ui.screens.win_screen        import WinScreen
 from ui.screens.rune_builder_screen import RuneBuilderScreen
+from ui.screens.skill_select_screen import SkillSelectScreen
+from ui import rune_ui_config as rune_cfg
 
 FPS            = 60
 WORLD_CENTER_X = 0.0
@@ -44,8 +47,11 @@ LIGHTNING_OVERLOAD_FX_INTERVAL = 0.10
 LIGHTNING_OVERLOAD_FX_RADIUS = 42.0
 LIGHTNING_BEAM_RANGE = 160.0
 LIGHTNING_BEAM_HIT_RADIUS = 24.0
-LIGHTNING_CHAIN_RADIUS = 280.0
 CAMERA_FOLLOW_SPEED = 9.5
+
+# Tầm bay đạn Fire = Bullet.BASE_SPEED (400) * lifetime. Giảm lifetime -> đạn
+# tự huỷ sớm hơn, bay gần lại (400 * 1.5 = 600px thay vì mặc định 1200px).
+FIRE_BULLET_LIFETIME = 1.5
 PLAYER_MAP_EDGE_RADIUS = 72.0
 
 
@@ -54,12 +60,13 @@ class GameLoop:
     State machine chính:
     MENU → PLAYING ⇄ RUNE_BUILDER → LEVEL_UP → GAME_OVER | WIN
     """
-    STATE_MENU         = 'menu'
-    STATE_PLAYING      = 'playing'
-    STATE_LEVEL_UP     = 'level_up'
-    STATE_RUNE_BUILDER = 'rune_builder'  # Tab → mở Rune Builder toàn màn hình
-    STATE_GAME_OVER    = 'game_over'
-    STATE_WIN          = 'win'
+    STATE_MENU           = 'menu'
+    STATE_ELEMENT_SELECT = 'skill_select'
+    STATE_PLAYING        = 'playing'
+    STATE_LEVEL_UP       = 'level_up'
+    STATE_RUNE_BUILDER   = 'rune_builder'
+    STATE_GAME_OVER      = 'game_over'
+    STATE_WIN            = 'win'
 
     def __init__(self):
         pygame.init()
@@ -85,7 +92,8 @@ class GameLoop:
         self.levelup_scr = LevelUpScreen(self.screen, font_big, font_small)
         self.gameover    = GameOverScreen(self.screen, font_big, font_small)
         self.win_scr     = WinScreen(self.screen, font_big, font_small)
-        self.builder     = RuneBuilderScreen(self.screen, font_big, font_small)
+        self.builder        = RuneBuilderScreen(self.screen, font_big, font_small)
+        self.skill_select = SkillSelectScreen(self.screen, font_big, font_small)
 
         self.state = self.STATE_MENU
         self._dt   = 0.0   # dt frame hiện tại (dùng cho builder timer)
@@ -141,10 +149,14 @@ class GameLoop:
         self._last_rmb_down    = -999.0
         self._breath_fuel      = self.BREATH_MAX_FUEL
         self._fire_jet         = None
-        self.spiral_orbit_angle = 0.0   # góc xoay vortex của lightning beam khi có SpiralModifier
+        self.spiral_orbit_angle = 0.0   # góc xoay vortex của lightning beam khi có TwistOfFateModifier
+        self._lightning_channel_active = False  # rising-edge: FuriousOutburst chỉ nổ lúc BẮT ĐẦU giữ chuột
         if not hasattr(self, "noclip_mode"):
             self.noclip_mode = False
         self.player.noclip_mode = self.noclip_mode
+        if not hasattr(self, "cheat_mode"):
+            self.cheat_mode = False
+        self.player.cheat_mode = self.cheat_mode
         # Đảm bảo player spawn tại vị trí hợp lệ, không bị kẹt trong tile cản
         self._place_entity_on_valid_map_spot(self.player)
         self.camera_x = self.player.x
@@ -181,11 +193,15 @@ class GameLoop:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F9:
             self.noclip_mode = not self.noclip_mode
             self.player.noclip_mode = self.noclip_mode
+            self.cheat_mode = True
+            self.player.cheat_mode = True
             print(f"[CHEAT] Noclip mode toggled: {self.noclip_mode}")
             return None
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F8:
             self._cheat_add_all_runes()
+            self.cheat_mode = True
+            self.player.cheat_mode = True
             print("[CHEAT] All runes added")
             return None
 
@@ -251,9 +267,20 @@ class GameLoop:
             result = self.menu.handle_event(event)
             if result == 'start':
                 self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self.skill_select.reset()
+                self.state = self.STATE_ELEMENT_SELECT
             elif result == 'quit':
                 return 'quit'
+
+        elif self.state == self.STATE_ELEMENT_SELECT:
+            result = self.skill_select.handle_event(event)
+            if result == 'quit':
+                return 'quit'
+            elif isinstance(result, tuple) and result[0] == 'confirm':
+                # Mỗi hệ đã chọn → 1 chiêu với lõi khóa cứng + layout cây riêng
+                runes = [rune_cfg.make_element_rune(k) for k in result[1]]
+                self.player.setup_spells(runes)
+                self.state = self.STATE_PLAYING
 
         elif self.state == self.STATE_LEVEL_UP:
             result = self.levelup_scr.handle_event(event)
@@ -265,7 +292,8 @@ class GameLoop:
             result = self.gameover.handle_event(event)
             if result == 'restart':
                 self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self.skill_select.reset()
+                self.state = self.STATE_ELEMENT_SELECT
             elif result == 'quit':
                 return 'quit'
 
@@ -273,7 +301,8 @@ class GameLoop:
             result = self.win_scr.handle_event(event)
             if result == 'restart':
                 self._init_game_objects()
-                self.state = self.STATE_PLAYING
+                self.skill_select.reset()
+                self.state = self.STATE_ELEMENT_SELECT
             elif result == 'quit':
                 return 'quit'
 
@@ -324,11 +353,15 @@ class GameLoop:
             if self._get_lightning_rune(spell):
                 channeled_lightning = self._channel_lightning_attack(wx, wy, dt)
             elif self.player.can_fire():
-                self._spawn_bullet(wx, wy)
+                if visual_type == 'wind_boomerang':
+                    self._spawn_wind_boomerang(wx, wy)
+                else:
+                    self._spawn_bullet(wx, wy)
                 self.player.reset_fire_timer()
         self._update_fire_breath(dt, visual_type, wx, wy)
         if not channeled_lightning:
             self._clear_primary_lightning_beam()
+            self._lightning_channel_active = False   # rising-edge cho FuriousOutburst
         self._update_lightning_overload(dt, channeled_lightning)
         self._emit_lightning_overload_effect(dt, moving_input)
 
@@ -351,7 +384,30 @@ class GameLoop:
                 e.reset_fire_timer()
 
         # 5. Update đạn
-        for b  in self.bullets:       b.update(dt)
+        bullet_context = {
+            'enemies': self.enemies,
+            'bullets': self.bullets,
+            'effects': self.effects,
+            'active_effects': self.active_effects,
+        }
+        for b in self.bullets:
+            # Đạn orbit quanh PLAYER (Self-Centered gắn thẳng root) không có
+            # _orbit_target — bám tâm player mỗi frame như cũ.
+            has_source = hasattr(b, '_orbit_target')
+            if hasattr(b, 'player_x') and not has_source:
+                b.player_x = self.player.x
+                b.player_y = self.player.y
+            # Tia kiếm Flash of Swords LUÔN GẮN LIỀN vào NGUỒN (boomerang/đạn)
+            # đã spawn ra nó — bám vị trí nguồn mỗi frame. Nguồn chết (hết
+            # pierce/hết đời) thì tia kiếm biến mất NGAY theo, không tồn tại
+            # tách rời khỏi đạn.
+            tgt = getattr(b, '_orbit_target', None)
+            if has_source and tgt is not None:
+                if getattr(tgt, 'alive', False):
+                    b.player_x, b.player_y = tgt.x, tgt.y
+                else:
+                    b.alive = False
+            b.update(dt, bullet_context)
         for eb in self.enemy_bullets: eb.update(dt)
 
         # 6. Va chạm đạn player ↔ enemy/boss
@@ -377,6 +433,12 @@ class GameLoop:
             dmg = self.boss.check_aoe_hit(self.player.x, self.player.y)
             if dmg:
                 self.player.take_damage(dmg * dt)
+
+        # 9b. Boss Charge — cú đấm nặng 1 lần/lượt (không nhân dt, xem check_charge_hit)
+        if self.boss and self.boss.is_charging:
+            dmg = self.boss.check_charge_hit(self.player.x, self.player.y, self.player.radius)
+            if dmg:
+                self.player.take_damage(dmg)
 
         # 10. XP orb — update magnet/scatter rồi collect
         for orb in self.xp_orbs:
@@ -436,12 +498,47 @@ class GameLoop:
         return None
 
     def _has_spiral_modifier(self, spell) -> bool:
-        """Kiểm tra spell có SpiralModifier không."""
-        from logic.rune.modifiers.spiral_modifier import SpiralModifier
+        """Kiểm tra spell có TwistOfFateModifier không (Ice/Lightning dùng nó
+        làm công tắc chuyển sang đòn xoáy vòng/vòng cung — thay cho
+        SpiralModifier cũ)."""
+        from logic.rune.modifiers.twist_of_fate_modifier import TwistOfFateModifier
         for modifier in spell.rune_tree.modifiers:
-            if isinstance(modifier, SpiralModifier):
+            if isinstance(modifier, TwistOfFateModifier):
                 return True
         return False
+
+    def _find_modifier(self, spell, cls):
+        """Tìm modifier kiểu `cls` bất kỳ đâu trong cây (kể cả lồng trong con).
+        Dùng cho Lightning/Ice — 2 hệ không sinh Bullet nên không tự chạy
+        on_fire/on_update, phải game_loop tự dò rune trong cây rồi gọi thẳng."""
+        def visit(modifier):
+            if isinstance(modifier, cls):
+                return modifier
+            for child in modifier.get_children():
+                found = visit(child)
+                if found is not None:
+                    return found
+            return None
+        for modifier in spell.rune_tree.modifiers:
+            found = visit(modifier)
+            if found is not None:
+                return found
+        return None
+
+    def _find_triggerable_modifiers(self, spell) -> list:
+        """Mọi modifier có `trigger_once()` trong cây (rune loại Trigger, VD
+        FuriousOutburst/RollingStone) — dùng cho Lightning/Ice/Wind, 3 hệ
+        không tự chạy on_fire/on_update nên không tự trigger được. Thêm rune
+        Trigger mới không cần sửa lại chỗ gọi (chỉ cần có hàm trigger_once)."""
+        found = []
+        def visit(modifier):
+            if hasattr(modifier, 'trigger_once'):
+                found.append(modifier)
+            for child in modifier.get_children():
+                visit(child)
+        for modifier in spell.rune_tree.modifiers:
+            visit(modifier)
+        return found
 
     def _get_ice_rune(self, spell):
         from logic.rune.elements.ice_rune import IceRune
@@ -471,17 +568,13 @@ class GameLoop:
         )
         has_spiral = self._has_spiral_modifier(spell)
         if has_spiral:
-            from logic.abilities.ice_attack import IceSpiralAttack
-            spiral_attack = IceSpiralAttack()
-            attack = spiral_attack.build_charge_attack(
-                ice_rune,
+            attack = ice_rune.build_spiral_charge_attack(
                 self.player.x,
                 self.player.y,
                 target_x,
                 target_y,
                 self.ice_charge["held"],
             )
-            # Khi có Spiral, ta bỏ qua chia góc của Split (như thảo luận trước đó)
             attacks = [attack]
         else:
             attack = ice_rune.build_charge_attack(
@@ -491,10 +584,7 @@ class GameLoop:
                 target_y,
                 self.ice_charge["held"],
             )
-            attacks = [
-                self._build_split_ice_attack(ice_rune, attack, angle, self.ice_charge["held"])
-                for angle in self._split_angles_for_spell(spell)
-            ]
+            attacks = [attack]
 
         self.ice_charge["attack"] = attack
         self.ice_charge["attacks"] = attacks
@@ -521,14 +611,88 @@ class GameLoop:
         enemy_alive_before = {id(enemy) for enemy in self.enemies if enemy.alive}
         damaged_targets = set()
 
+        context = {'bullets': self.bullets, 'active_effects': self.active_effects}
+
+        # Spike sạc-thả không có "quãng đường bay" → rune Trigger ĐƠN GIẢN
+        # (RollingStone/FuriousOutburst/DestructivePath...) chỉ nổ đúng 1 lần
+        # mỗi lần thả tay. Trigger THAM GIA cast graph (IS_CAST_GRAPH_TRIGGER,
+        # VD Perfect Storm) tách riêng bên dưới để tôn trọng Spawn Count/Damage
+        # của Frenetic Energy/Stars Aligned gắn vào nó — tránh nổ 2 lần.
+        for trig in self._find_triggerable_modifiers(spell):
+            if getattr(trig, 'IS_CAST_GRAPH_TRIGGER', False):
+                continue
+            spawned = trig.trigger_once(self.player.x, self.player.y, self.player.damage, context)
+            if spawned is not None:
+                self.bullets.append(spawned)
+
+        # Cast graph (Frenetic Energy/Stars Aligned/Perfect Storm...) — neo vào
+        # Trigger gần nhất hoặc Spell gốc, cùng luật với Fire/Wind (xem
+        # RuneTree.resolve_cast_graph). Spike sạc-thả không có Bullet object
+        # nên tính thủ công ở đây: Spawn Count → thêm gai quạt quanh player;
+        # Damage → nhân thêm vào damage_mult có sẵn của từng gai. (Không co
+        # giãn hình học/width gai theo Size — corners đã build sẵn theo width
+        # cố định — chỉ Trigger con của nó mới nhận size_mult, VD bán kính
+        # VortexZone của Perfect Storm.)
+        root_params, trigger_params, trigger_reference, order = spell.rune_tree.resolve_cast_graph()
+
+        base_attack = self.ice_charge.get("attack")
+        held_time   = self.ice_charge.get("held", 0.0)
+        base_angle  = math.atan2(base_attack["dir_y"], base_attack["dir_x"]) if base_attack else 0.0
+        # Mỗi rune giữ ĐÚNG batch riêng VÀ đúng ĐỘI HÌNH riêng của nó:
+        #   'line' (Stars Aligned) → gai DÀN HÀNG SONG SONG: lệch vị trí vuông
+        #     góc hướng bắn, CÙNG hướng (không toả góc).
+        #   'cone' (Frenetic Energy) → gai TOẢ QUẠT quanh hướng bắn.
+        if base_attack is not None and not attacks[0].get("is_spiral"):
+            for count, pattern, spread in root_params.batches:
+                if pattern == 'line':
+                    perp = base_angle + math.pi / 2
+                    for i in range(count):
+                        centered = i - (count - 1) / 2.0
+                        ox = self.player.x + math.cos(perp) * spread * centered
+                        oy = self.player.y + math.sin(perp) * spread * centered
+                        attacks.append(self._build_ice_attack_at(ice_rune, ox, oy, base_angle, held_time))
+                else:
+                    fan_total = spread if spread > 0 else 50.0
+                    fan_step  = fan_total / max(1, count)
+                    for i in range(count):
+                        offset_deg = (i - (count - 1) / 2.0) * fan_step
+                        attacks.append(self._build_split_ice_attack(ice_rune, base_attack, offset_deg, held_time))
+
+        # Flash of Swords trên Ice: lưỡi kiếm xuất hiện & gắn ở ĐIỂM CUỐI gai
+        # băng (end_x/end_y) thay vì quanh player — spike không "bay" nên mũi
+        # gai là "điểm rơi" tự nhiên nhất để neo kiếm vào.
+        from logic.rune.modifiers.flash_of_swords_trigger import FlashOfSwordsTrigger
+        if base_attack is not None:
+            self._cap_ice_attack_at_first_enemy(base_attack)   # kiếm neo ở điểm chạm
+            fos_origin = (base_attack["end_x"], base_attack["end_y"])
+        else:
+            fos_origin = (self.player.x, self.player.y)
+
+        root_damage = self.player.damage * root_params.damage_mult
+        firings = spell.rune_tree.resolve_trigger_firings(
+            root_damage, root_params.spawn_count, trigger_params, trigger_reference, order)
+        for node, base_dmg, params in firings:
+            ox_c, oy_c = fos_origin if isinstance(node, FlashOfSwordsTrigger) \
+                else (self.player.x, self.player.y)
+            batches = spell.rune_tree._orbit_even_batches(node, params.batches)
+            positions = spell.rune_tree.resolve_batch_positions(
+                ox_c, oy_c, base_angle, batches)
+            for tx, ty, jitter_deg in positions:
+                spawned = node.trigger_once(tx, ty, base_dmg, context,
+                                            angle_jitter_deg=jitter_deg,
+                                            speed_mult=params.speed_mult, size_mult=params.size_mult,
+                                            duration_mult=params.duration_mult, source=None)
+                if spawned is not None:
+                    self.bullets.append(spawned)
+
         for attack in attacks:
-            damage = self.player.damage * attack["damage_mult"]
+            damage = self.player.damage * attack["damage_mult"] * root_params.damage_mult
             
             if attack.get("is_spiral"):
-                from logic.abilities.ice_attack import IceSpiralAttack
-                spiral_attack = IceSpiralAttack()
-                hits = spiral_attack.targets_in_ice_spiral(attack, self.enemies)
+                hits = ice_rune.targets_in_ice_spiral(attack, self.enemies)
             else:
+                # Gai thẳng: dừng ở địch gần nhất (cắt cả hitbox lẫn hình gai).
+                self._cap_ice_attack_at_first_enemy(attack)
                 hits = self._targets_in_ice_hitbox(attack)
                 
             for target in hits:
@@ -571,80 +735,64 @@ class GameLoop:
     def _cancel_ice_charge(self) -> None:
         self.ice_charge = None
 
+    def _build_ice_attack_at(self, ice_rune, start_x: float, start_y: float,
+                             angle: float, held_time: float) -> dict:
+        """Dựng 1 gai băng bắt đầu tại (start_x, start_y) theo hướng `angle`
+        (radian) — dùng cho đội hình DÀN HÀNG SONG SONG (Stars Aligned): các
+        gai lệch vị trí nhưng CÙNG hướng, không toả góc."""
+        target_x = start_x + math.cos(angle) * 100
+        target_y = start_y + math.sin(angle) * 100
+        return ice_rune.build_charge_attack(start_x, start_y, target_x, target_y, held_time)
+
     def _build_split_ice_attack(self, ice_rune, base_attack: dict, angle_offset: float, held_time: float) -> dict:
         base_angle = math.atan2(base_attack["dir_y"], base_attack["dir_x"])
         angle = base_angle + math.radians(angle_offset)
         target_x = self.player.x + math.cos(angle) * 100
         target_y = self.player.y + math.sin(angle) * 100
-        attack = ice_rune.build_charge_attack(
+        # Không cắt theo viewport nữa: spike đạt đủ độ dài theo mức sạc ở
+        # MỌI hướng (trước đây bắn dọc bị cắt ngắn vì màn hình thấp hơn rộng).
+        return ice_rune.build_charge_attack(
             self.player.x,
             self.player.y,
             target_x,
             target_y,
             held_time,
         )
-        max_length = self._ice_camera_length_cap(attack)
-        if max_length < attack["length"]:
-            attack = ice_rune.build_charge_attack(
-                self.player.x,
-                self.player.y,
-                target_x,
-                target_y,
-                held_time,
-                max_length=max_length,
-            )
-        return attack
 
-    def _split_angles_for_spell(self, spell) -> list[float]:
-        split_angle = self._split_angle_for_spell(spell)
-        if split_angle <= 0:
-            return [0.0]
-        return [0.0, -split_angle, split_angle]
 
-    def _split_angle_for_spell(self, spell) -> float:
-        from logic.rune.modifiers.split_modifier import SplitModifier
-
-        stack = 0
-
-        def visit(modifier) -> None:
-            nonlocal stack
-            if isinstance(modifier, SplitModifier):
-                stack = max(stack, getattr(modifier, "stack", 1))
-            for child in modifier.get_children():
-                visit(child)
-
-        for modifier in spell.rune_tree.modifiers:
-            visit(modifier)
-        if stack <= 0:
-            return 0.0
-        return SplitModifier.SPLIT_ANGLE
-
-    def _ice_camera_length_cap(self, attack: dict) -> float:
-        zoom = max(0.001, getattr(self.renderer, "zoom", 1.0))
-        margin = attack["width"] / 2 + 18.0
-        left = self._camera_x() - SCREEN_W / (2 * zoom) + margin
-        right = self._camera_x() + SCREEN_W / (2 * zoom) - margin
-        top = self._camera_y() - SCREEN_H / (2 * zoom) + margin
-        bottom = self._camera_y() + SCREEN_H / (2 * zoom) - margin
-
-        start_x = attack["start_x"]
-        start_y = attack["start_y"]
-        dir_x = attack["dir_x"]
-        dir_y = attack["dir_y"]
-        limits = []
-        if dir_x > 0:
-            limits.append((right - start_x) / dir_x)
-        elif dir_x < 0:
-            limits.append((left - start_x) / dir_x)
-        if dir_y > 0:
-            limits.append((bottom - start_y) / dir_y)
-        elif dir_y < 0:
-            limits.append((top - start_y) / dir_y)
-
-        positive_limits = [value for value in limits if value > 0]
-        if not positive_limits:
-            return attack["length"]
-        return min(attack["length"], max(32.0, min(positive_limits)))
+    def _cap_ice_attack_at_first_enemy(self, attack: dict) -> None:
+        """Cắt gai băng lại tại địch GẦN NHẤT dọc trục gai (không cho xuyên
+        hết): sửa end_x/end_y/length/corners tại chỗ để cả hitbox lẫn hình gai
+        dừng ở điểm chạm. Không địch nào chắn đường → giữ nguyên (vươn full)."""
+        sx, sy = attack["start_x"], attack["start_y"]
+        dx, dy = attack["dir_x"], attack["dir_y"]   # đã chuẩn hoá trong build_charge_attack
+        length = attack["length"]
+        half_w = attack["width"] / 2
+        nearest = None
+        for enemy in self._living_targets():
+            proj = (enemy.x - sx) * dx + (enemy.y - sy) * dy
+            if proj < 0.0 or proj > length:
+                continue
+            cx = sx + dx * proj
+            cy = sy + dy * proj
+            if math.hypot(enemy.x - cx, enemy.y - cy) <= half_w + enemy.radius:
+                if nearest is None or proj < nearest:
+                    nearest = proj
+        if nearest is None:
+            return
+        new_len = max(8.0, nearest)
+        ex = sx + dx * new_len
+        ey = sy + dy * new_len
+        perp_x, perp_y = -dy, dx
+        attack["end_x"] = ex
+        attack["end_y"] = ey
+        attack["length"] = new_len
+        attack["corners"] = [
+            (sx + perp_x * half_w, sy + perp_y * half_w),
+            (ex + perp_x * half_w, ey + perp_y * half_w),
+            (ex - perp_x * half_w, ey - perp_y * half_w),
+            (sx - perp_x * half_w, sy - perp_y * half_w),
+        ]
 
     def _targets_in_ice_hitbox(self, attack: dict) -> list:
         sx, sy = attack["start_x"], attack["start_y"]
@@ -723,9 +871,71 @@ class GameLoop:
         stack = getattr(lightning, 'element_stack', 1)
         primary_hit_damage = self.player.damage + lightning.BONUS_DAMAGE * stack
         primary_damage = (primary_hit_damage / max(spell.fire_rate, 0.08)) * dt
+        # chain_damage/max_targets: chỉ còn dùng cho biến thể Spiral ring
+        # (_execute_lightning_spiral_ring). Tia thẳng đã bỏ chain (đơn mục tiêu).
         chain_damage = primary_damage * 0.45
         max_targets = 1 + min(4, 2 + stack)
         cast_lock = 0.10
+
+        # Cast graph (Frenetic Energy/Stars Aligned/Perfect Storm...) — neo vào
+        # Trigger gần nhất hoặc Spell gốc, cùng luật với Fire/Wind/Ice (xem
+        # RuneTree.resolve_cast_graph). Beam tức thời không có Bullet object
+        # nên tính thủ công: Spawn Count → thêm chùm tia song song (cộng vào
+        # split_angles bên dưới); Damage → nhân thêm vào primary/chain damage.
+        root_params, trigger_params, trigger_reference, order = spell.rune_tree.resolve_cast_graph()
+        primary_damage *= root_params.damage_mult
+        chain_damage   *= root_params.damage_mult
+        primary_hit_damage *= root_params.damage_mult
+
+        context = {'bullets': self.bullets, 'active_effects': self.active_effects}
+
+        # Beam tức thời không có "quãng đường bay" → rune Trigger ĐƠN GIẢN
+        # (RollingStone/FuriousOutburst/DestructivePath...) chỉ nổ đúng 1 lần
+        # lúc BẮT ĐẦU giữ chuột (rising edge), giữ lâu không nổ thêm. Trigger
+        # THAM GIA cast graph (IS_CAST_GRAPH_TRIGGER, VD Perfect Storm) tách
+        # riêng bên dưới để tôn trọng Spawn Count/Damage gắn vào nó.
+        if not self._lightning_channel_active:
+            self._lightning_channel_active = True
+            for trig in self._find_triggerable_modifiers(spell):
+                if getattr(trig, 'IS_CAST_GRAPH_TRIGGER', False):
+                    continue
+                spawned = trig.trigger_once(self.player.x, self.player.y, primary_hit_damage, context)
+                if spawned is not None:
+                    self.bullets.append(spawned)
+
+            # Flash of Swords trên Lightning: lưỡi kiếm neo ở ĐIỂM CHẠM địch
+            # gần nhất trên tia (tia dừng ở đó); không trúng ai → cuối tầm tia.
+            from logic.rune.modifiers.flash_of_swords_trigger import FlashOfSwordsTrigger
+            aim_x, aim_y = self._lightning_aim_direction(target_x, target_y)
+            b_sx, b_sy = self._lightning_cast_origin(aim_x, aim_y)
+            b_ex = b_sx + aim_x * LIGHTNING_BEAM_RANGE
+            b_ey = b_sy + aim_y * LIGHTNING_BEAM_RANGE
+            aim_hits = self._targets_in_lightning_beam(b_sx, b_sy, b_ex, b_ey)
+            if aim_hits:
+                t0 = aim_hits[0]
+                sdx, sdy = b_ex - b_sx, b_ey - b_sy
+                sl = sdx * sdx + sdy * sdy
+                p = max(0.0, min(1.0, ((t0.x - b_sx) * sdx + (t0.y - b_sy) * sdy) / sl))
+                fos_origin = (b_sx + sdx * p, b_sy + sdy * p)
+            else:
+                fos_origin = (b_ex, b_ey)
+
+            firings = spell.rune_tree.resolve_trigger_firings(
+                primary_hit_damage, root_params.spawn_count, trigger_params, trigger_reference, order)
+            base_angle = math.atan2(target_y - self.player.y, target_x - self.player.x)
+            for node, base_dmg, params in firings:
+                ox_c, oy_c = fos_origin if isinstance(node, FlashOfSwordsTrigger) \
+                    else (self.player.x, self.player.y)
+                batches = spell.rune_tree._orbit_even_batches(node, params.batches)
+                positions = spell.rune_tree.resolve_batch_positions(
+                    ox_c, oy_c, base_angle, batches)
+                for tx, ty, jitter_deg in positions:
+                    spawned = node.trigger_once(tx, ty, base_dmg, context,
+                                                angle_jitter_deg=jitter_deg,
+                                                speed_mult=params.speed_mult, size_mult=params.size_mult,
+                                                duration_mult=params.duration_mult, source=None)
+                    if spawned is not None:
+                        self.bullets.append(spawned)
 
         self.player.cast_lock_timer = cast_lock
         self.player.attack_timer = 0.18
@@ -735,19 +945,9 @@ class GameLoop:
 
         has_spiral = self._has_spiral_modifier(spell)
         if has_spiral:
-            # ── Vortex ring được tách ra class riêng ─────────────────────────────
-            from logic.abilities.lightning_attack import LightningSpiralAttack
-            spiral_attack = LightningSpiralAttack()
-            return spiral_attack.execute(
-                game_loop=self,
-                target_x=target_x,
-                target_y=target_y,
-                primary_damage=primary_damage,
-                chain_damage=chain_damage,
-                max_targets=max_targets,
-                alive_before=alive_before,
-                boss_alive_before=boss_alive_before,
-            )
+            return self._execute_lightning_spiral_ring(
+                target_x, target_y, primary_damage, chain_damage,
+                max_targets, alive_before, boss_alive_before)
 
         # ── Normal lightning beam ────────────────────────────────────────────
         aim_x, aim_y = self._lightning_aim_direction(target_x, target_y)
@@ -757,47 +957,110 @@ class GameLoop:
         elif aim_x > 0:
             self.player.facing_dir = 1
 
-        split_angles = self._split_angles_for_spell(spell)
-        self._trim_primary_lightning_beams(len(split_angles))
-        for beam_id, angle_offset in enumerate(split_angles):
-            dir_x, dir_y = self._rotated_direction(aim_x, aim_y, angle_offset)
-            start_x, start_y = self._lightning_cast_origin(dir_x, dir_y)
+        # Mỗi rune giữ ĐÚNG batch riêng VÀ đúng ĐỘI HÌNH riêng của nó. Mỗi beam
+        # mô tả bằng (kind, value):
+        #   ('fan',  angle_deg) → toả góc quanh player (Frenetic cone).
+        #   ('line', offset_px) → SONG SONG: lệch gốc vuông góc, CÙNG hướng
+        #     (Stars Aligned) — không toả góc nữa.
+        beams = [('fan', 0.0)]
+        for count, pattern, spread in root_params.batches:
+            if pattern == 'line':
+                for i in range(count):
+                    beams.append(('line', spread * (i - (count - 1) / 2.0)))
+            else:
+                fan_total = spread if spread > 0 else 50.0
+                fan_step  = fan_total / max(1, count)
+                for i in range(count):
+                    beams.append(('fan', (i - (count - 1) / 2.0) * fan_step))
+        self._trim_primary_lightning_beams(len(beams))
+        for beam_id, (kind, value) in enumerate(beams):
+            if kind == 'line':
+                dir_x, dir_y = aim_x, aim_y
+                ox, oy = self._lightning_cast_origin(aim_x, aim_y)
+                start_x = ox + (-aim_y) * value
+                start_y = oy + aim_x * value
+            else:
+                dir_x, dir_y = self._rotated_direction(aim_x, aim_y, value)
+                start_x, start_y = self._lightning_cast_origin(dir_x, dir_y)
             end_x = start_x + dir_x * LIGHTNING_BEAM_RANGE
             end_y = start_y + dir_y * LIGHTNING_BEAM_RANGE
+
+            # Tia dừng ở địch GẦN NHẤT: không chain, không xuyên. Cắt cả damage
+            # lẫn hình tia tại điểm chạm con đầu tiên trên đường tia.
+            beam_hits = self._targets_in_lightning_beam(start_x, start_y, end_x, end_y)
+            if beam_hits:
+                target = beam_hits[0]
+                seg_dx, seg_dy = end_x - start_x, end_y - start_y
+                seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
+                proj = ((target.x - start_x) * seg_dx + (target.y - start_y) * seg_dy) / seg_len_sq
+                proj = max(0.0, min(1.0, proj))
+                end_x = start_x + seg_dx * proj
+                end_y = start_y + seg_dy * proj
+                target.take_damage(primary_damage)
+
             self._set_primary_lightning_beam(start_x, start_y, end_x, end_y, beam_id=beam_id, vortex=False)
 
-            beam_hits = self._targets_in_lightning_beam(start_x, start_y, end_x, end_y)
-
-            beam_hits = self._targets_in_lightning_beam(start_x, start_y, end_x, end_y)
-            if not beam_hits:
-                continue
-
-            hit_targets = [beam_hits[0]]
-            current = beam_hits[0]
-            while len(hit_targets) < max_targets:
-                next_target = self._nearest_chain_target(current, hit_targets, LIGHTNING_CHAIN_RADIUS)
-                if next_target is None:
-                    break
-                hit_targets.append(next_target)
-                current = next_target
-
-            previous = hit_targets[0]
-            previous.take_damage(primary_damage)
-            for enemy in hit_targets[1:]:
-                self.effects.append({
-                    'kind': 'lightning_beam',
-                    'x': previous.x,
-                    'y': previous.y,
-                    'x2': enemy.x,
-                    'y2': enemy.y,
-                    'duration': 0.12,
-                    'loop_anim': True,
-                    'frame_ms': 75,
-                })
-                enemy.take_damage(chain_damage)
-                previous = enemy
-
         self._drop_xp_from_ultimate_kills(alive_before, boss_alive_before)
+        return True
+
+    def _execute_lightning_spiral_ring(
+        self,
+        target_x: float,
+        target_y: float,
+        primary_damage: float,
+        chain_damage: float,
+        max_targets: int,
+        alive_before: set,
+        boss_alive_before: bool,
+    ) -> bool:
+        """Vòng cung tĩnh (Vortex Ring) khi Lightning có TwistOfFateModifier — thay
+        vì bắn tia thẳng, tia sét khép thành vòng cung/vòng tròn bao quanh
+        player. Trước đây tách thành class `LightningSpiralAttack` riêng dưới
+        `logic/abilities/`, nhưng nó chỉ gọi từ ĐÚNG 1 chỗ và thao tác thẳng
+        lên state của GameLoop (không phải logic thuần) — vi phạm quy tắc
+        `logic/` không được phụ thuộc `ui/`, nên đưa lại thành method ở đây."""
+        # Bán kính thu nhỏ lại để bao sát người hơn (như yêu cầu "thu nhỏ bán kính")
+        radius = LIGHTNING_BEAM_RANGE * 0.55
+
+        # 1. Tính toán quỹ đạo vòng cung tĩnh
+        cx, cy = self.player.x, self.player.y
+        aim_x, aim_y = self._lightning_aim_direction(target_x, target_y)
+        orbit_angle = math.atan2(aim_y, aim_x)
+
+        # Khoảng hở GAP trong renderer là 0.7. Góc bắt đầu vòng cung là orbit_angle + 0.35.
+        start_angle = orbit_angle + 0.35
+
+        # Điểm bắt đầu vòng cung để tia thẳng nối vào (link point)
+        link_x = cx + math.cos(start_angle) * radius
+        link_y = cy + math.sin(start_angle) * radius
+
+        # Điểm tâm khoảng hở để UI biết cách xoay vòng cung
+        gap_x = cx + math.cos(orbit_angle) * radius
+        gap_y = cy + math.sin(orbit_angle) * radius
+
+        # Xóa các beam cũ. Ta cần 2 beam: 1 tia thẳng, 1 vòng cung.
+        self._trim_primary_lightning_beams(2)
+
+        # Tia 1: Tia thẳng xuất phát từ nhân vật nối khít vào điểm BẮT ĐẦU của đường tròn
+        self._set_primary_lightning_beam(cx, cy, link_x, link_y, beam_id=0, vortex=False)
+
+        # Tia 2: Vòng cung khép kín bao quanh nhân vật
+        self._set_primary_lightning_beam(cx, cy, gap_x, gap_y, beam_id=1, vortex=True)
+
+        if aim_x < 0:
+            self.player.facing_dir = -1
+        elif aim_x > 0:
+            self.player.facing_dir = 1
+
+        # 2. Xử lý sát thương (Tìm quái trong bán kính orbit)
+        ring_hits = self._targets_in_vortex(cx, cy, radius)
+        for i, target in enumerate(ring_hits[:max_targets]):
+            dmg = primary_damage if i == 0 else chain_damage
+            target.take_damage(dmg)
+
+        # 3. Rớt XP nếu quái chết
+        self._drop_xp_from_ultimate_kills(alive_before, boss_alive_before)
+
         return True
 
     def _set_primary_lightning_beam(
@@ -925,17 +1188,6 @@ class GameLoop:
         hits.sort(key=lambda item: item[0])
         return [enemy for _, enemy in hits]
 
-    def _nearest_chain_target(self, source, already_hit: list, chain_radius: float):
-        already_ids = {id(enemy) for enemy in already_hit}
-        candidates = [
-            enemy for enemy in self._living_targets()
-            if id(enemy) not in already_ids
-            and math.hypot(enemy.x - source.x, enemy.y - source.y) <= chain_radius
-        ]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda enemy: math.hypot(enemy.x - source.x, enemy.y - source.y))
-
     def _living_targets(self) -> list:
         targets = [enemy for enemy in self.enemies if enemy.alive]
         if self.boss and self.boss.alive:
@@ -962,16 +1214,28 @@ class GameLoop:
         bullet.is_crit = is_crit   # renderer dùng để flash màu
         self.player.attack_timer = 0.18
         bullet.visual_type = rune_tree.get_visual_type()
+        if bullet.visual_type == 'fire_bolt':
+            bullet.LIFETIME = FIRE_BULLET_LIFETIME   # giảm tầm bay đạn Fire
 
         context = {
             'enemies': self.enemies,
             'bullets': self.bullets,
             'effects': self.effects,
+            'active_effects': self.active_effects,
         }
         extra   = rune_tree.on_fire(bullet, context)
         for b in extra:
-            b.visual_type = bullet.visual_type
-            b.is_crit = is_crit
+            # Bản sao từ Spawn Count (Frenetic/Stars Aligned) chưa có
+            # visual_type riêng -> kế thừa hình dạng đạn chính. Đạn do TRIGGER
+            # tạo ra (Flash of Swords, RollingStone, FuriousOutburst...) đã tự
+            # set visual_type riêng trong trigger_once() -> KHÔNG ghi đè, nếu
+            # không tia kiếm sẽ hiện lại thành hình viên đạn thường.
+            if not hasattr(b, 'visual_type'):
+                b.visual_type = bullet.visual_type
+            if not hasattr(b, 'is_crit'):
+                b.is_crit = is_crit
+            if b.visual_type == 'fire_bolt':
+                b.LIFETIME = FIRE_BULLET_LIFETIME   # bản sao Fire cũng bay gần lại
         self.bullets.append(bullet)
         self.bullets.extend(extra)
 
@@ -980,27 +1244,87 @@ class GameLoop:
             'enemies': self.enemies,
             'bullets': self.bullets,
             'effects': self.effects,
+            'active_effects': self.active_effects,
         }
         for bullet in self.bullets:
             if not bullet.alive:
                 continue
+            pierce   = getattr(bullet, 'pierce', False)
+            hit_ids  = getattr(bullet, '_hit_ids', None)
             for enemy in self.enemies:
                 if not enemy.alive:
                     continue
+                if pierce and hit_ids is not None and id(enemy) in hit_ids:
+                    continue
                 dist = math.hypot(bullet.x - enemy.x, bullet.y - enemy.y)
                 if dist <= bullet.radius + enemy.radius:
-                    bullet.on_hit(enemy, context)
+                    result = bullet.on_hit(enemy, context)
+                    if result is False:
+                        continue
                     enemy.take_damage(bullet.damage)
                     if not bullet.alive:
                         self._spawn_impact(bullet)
-                    break
-            if bullet.alive and self.boss and self.boss.alive:
+                        break
+                    elif pierce:
+                        self._spawn_wind_hit(bullet)
+                    else:
+                        break
+            if not bullet.alive:
+                continue
+            if self.boss and self.boss.alive:
+                hit_ids = getattr(bullet, '_hit_ids', None)
+                if pierce and hit_ids is not None and id(self.boss) in hit_ids:
+                    continue
                 dist = math.hypot(bullet.x - self.boss.x, bullet.y - self.boss.y)
                 if dist <= bullet.radius + self.boss.radius:
-                    bullet.on_hit(self.boss, context)
-                    self.boss.take_damage(bullet.damage)
-                    if not bullet.alive:
-                        self._spawn_impact(bullet)
+                    result = bullet.on_hit(self.boss, context)
+                    if result is not False:
+                        self.boss.take_damage(bullet.damage)
+                        if not bullet.alive:
+                            self._spawn_impact(bullet)
+                        elif pierce:
+                            self._spawn_wind_hit(bullet)
+
+    def _spawn_wind_boomerang(self, target_x: float, target_y: float) -> None:
+        import random as _rnd
+        spell     = self.player.get_active_spell()
+        rune_tree = spell.rune_tree
+        damage    = self.player.damage
+        is_crit   = _rnd.random() < self.player.get_crit_chance()
+        if is_crit:
+            damage *= 2.0
+
+        boomerang = WindBoomerang(
+            self.player.x, self.player.y,
+            target_x, target_y,
+            damage, rune_tree,
+        )
+        boomerang.is_crit = is_crit
+
+        # Boomerang giờ đi qua rune_tree.on_fire() y hệt Bullet của Fire — mọi
+        # cast-graph rune (Frenetic Energy/Stars Aligned/Perfect Storm...) đều
+        # chạy chung 1 đường, không cần code Trigger thủ công riêng cho Wind
+        # nữa (RuneTree tự nhân bản đúng class WindBoomerang).
+        context = {
+            'enemies': self.enemies,
+            'bullets': self.bullets,
+            'effects': self.effects,
+            'active_effects': self.active_effects,
+        }
+        extra = rune_tree.on_fire(boomerang, context)
+        for b in extra:
+            b.is_crit = is_crit
+        self.bullets.append(boomerang)
+        self.bullets.extend(extra)
+
+    def _spawn_wind_hit(self, bullet) -> None:
+        self.effects.append({
+            'kind': 'wind_hit',
+            'x': bullet.x,
+            'y': bullet.y,
+            'duration': 0.38,
+            'age': 0.0,
+        })
 
     def _spawn_impact(self, bullet) -> None:
         vt = getattr(bullet, 'visual_type', '')
@@ -1015,10 +1339,13 @@ class GameLoop:
             'enemies': self.enemies,
             'bullets': self.bullets,
             'effects': self.effects,
+            'active_effects': self.active_effects,
         }
         for effect in self.active_effects:
             if not effect.alive:
                 continue
+            if hasattr(effect, 'apply_pull'):
+                effect.apply_pull(self.enemies, self.boss)
             hits = effect.check_hits(self.enemies, self.boss)
             if not hits:
                 continue
@@ -1297,7 +1624,10 @@ class GameLoop:
             dist = math.hypot(self.player.x - enemy.x, self.player.y - enemy.y)
             if dist <= self.player.radius + enemy.radius:
                 self.player.take_damage(getattr(enemy, "damage", CONTACT_DAMAGE) * dt)
-        if self.boss and self.boss.alive:
+        if self.boss and self.boss.alive and not self.boss.is_charging:
+            # Lúc đang charge KHÔNG cộng thêm dame chạm thường — charge có
+            # cú đấm riêng (check_charge_hit, 1 lần/lượt) để tránh cộng dồn
+            # 2 loại dame cùng lúc khi player đứng trong đường charge.
             dist = math.hypot(self.player.x - self.boss.x, self.player.y - self.boss.y)
             if dist <= self.player.radius + self.boss.radius:
                 self.player.take_damage(getattr(self.boss, "damage", CONTACT_DAMAGE) * dt)
@@ -1358,36 +1688,16 @@ class GameLoop:
             'enemies': self.enemies,
             'bullets': self.bullets,
             'effects': self.effects,
+            'active_effects': self.active_effects,
         }
         info    = ult.activate(self.player, self.enemies, self.boss, context)
         self.player.reset_ultimate()
         self.ultimate_flash = info   # renderer dùng để vẽ AoE ring
 
     def _cheat_add_all_runes(self) -> None:
-        from logic.rune.elements.fire_rune import FireRune
-        from logic.rune.elements.ice_rune import IceRune
-        from logic.rune.elements.lightning_rune import LightningRune
-        from logic.rune.elements.poison_rune import PoisonRune
-        from logic.rune.elements.wind_rune import WindRune
-        from logic.rune.elements.blood_rune import BloodRune
-        from logic.rune.modifiers.bounce_modifier import BounceModifier
-        from logic.rune.modifiers.haste_rune import HasteRune
-        from logic.rune.modifiers.spiral_modifier import SpiralModifier
-        from logic.rune.modifiers.split_modifier import SplitModifier
-
-        rune_classes = (
-            FireRune,
-            IceRune,
-            LightningRune,
-            PoisonRune,
-            WindRune,
-            BloodRune,
-            SpiralModifier,
-            BounceModifier,
-            SplitModifier,
-            HasteRune,
-        )
-        for rune_cls in rune_classes:
+        # Chỉ thêm modifier rune vào kho (element đã chọn lúc đầu game).
+        from logic.leveling.level_manager import ALL_RUNES
+        for rune_cls in ALL_RUNES:
             self.player.add_to_inventory(rune_cls())
 
     def _drop_xp_from_ultimate_kills(self, alive_before: set, boss_alive_before: bool) -> None:
@@ -1494,6 +1804,9 @@ class GameLoop:
     def _draw(self) -> None:
         if self.state == self.STATE_MENU:
             self.menu.draw()
+
+        elif self.state == self.STATE_ELEMENT_SELECT:
+            self.skill_select.draw(self._dt)
 
         elif self.state in (self.STATE_PLAYING, self.STATE_LEVEL_UP):
             self.renderer.draw_all(

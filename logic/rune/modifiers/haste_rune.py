@@ -1,6 +1,5 @@
 from logic.rune.rune_component import ModifierRune
 
-
 class HasteRune(ModifierRune):
     """
     Rune Tốc Độ — passive giảm cooldown chiêu chứa nó.
@@ -11,15 +10,12 @@ class HasteRune(ModifierRune):
     REDUCTION_PER_STACK = 0.20   # giảm 20% mỗi stack
     MIN_FIRE_RATE       = 0.10   # giới hạn tối thiểu (giây)
     BASE_FIRE_RATE      = 0.50   # fire rate mặc định của chiêu
-
-    def __init__(self):
-        super().__init__()
-        self.stack = 1
+    POINT_COST          = 1      # passive nhẹ — rẻ
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
         pass
 
-    def on_update(self, bullet, dt: float) -> None:
+    def on_update(self, bullet, dt: float, context: dict = None) -> None:
         pass
 
     def on_fire(self, bullet, context: dict) -> list:
@@ -33,5 +29,6 @@ class HasteRune(ModifierRune):
 
     def get_display_name(self) -> str: return "Haste Rune"
     def get_description(self) -> str:
-        return f"Reduces spell cooldown by {int(self.REDUCTION_PER_STACK * 100 * self.stack)}%"
+        pct = int(self.REDUCTION_PER_STACK * 100 * self.stack)
+        return f"Reduces spell cooldown by {pct}% (Cost: {self.POINT_COST})"
     def get_color(self) -> tuple: return (100, 220, 255)

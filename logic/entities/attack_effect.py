@@ -8,6 +8,7 @@ Hệ thống:
   ImpactEffect → hiệu ứng nổ thuần visual, không gây damage
 """
 import math
+import random
 
 
 # ── Proxy object cho rune_tree.on_hit ────────────────────────────────────────
@@ -227,6 +228,114 @@ class AoEBurst:
                 hits.append(entity)
                 self._hit_ids.add(id(entity))
         return hits
+
+
+# ── VortexZone — lốc xoáy đứng yên, hút quái về tâm (Perfect Storm) ──────────
+
+class VortexZone:
+    """
+    Vùng lốc xoáy trong `duration` giây — TRÔI CHẬM về phía trước theo hướng
+    đường đạn đã cast ra nó, vừa đi vừa lượn zigzag ngang nhẹ (không đứng yên
+    1 chỗ, cũng không chỉ dao động qua lại tại điểm cast).
+    - Gây damage 1 lần cho quái mới vào vùng (giống AoEBurst).
+    - Mỗi frame còn hoạt động, hút MỌI quái đang đứng trong vùng về tâm HIỆN
+      TẠI (áp/refresh StatusEffect 'vortex' — mạnh dần theo `vortex_stacks`).
+    Dùng cho PerfectStormModifier (Trigger "Triggered on spawn").
+    """
+
+    GROW_DUR = 0.2   # chỉ để hiệu ứng hiện dần, không ảnh hưởng damage/hút
+
+    DRIFT_SPEED      = 40.0   # px/s — tốc độ trôi tới theo hướng đường đạn
+    ZIGZAG_AMPLITUDE = 22.0   # px — biên độ lượn ngang quanh trục trôi
+    ZIGZAG_SPEED     = 2.4    # rad/s — tần số lượn ngang
+    WOBBLE_JITTER    = 0.8    # rad/s — tốc độ đổi độ lệch ngẫu nhiên (random walk)
+    WOBBLE_LIMIT     = 0.6    # kẹp biên độ lệch ngẫu nhiên (tỉ lệ ZIGZAG_AMPLITUDE)
+
+    def __init__(self, x: float, y: float, damage: float, radius: float,
+                 duration: float, vortex_stacks: int,
+                 pull_strength: float = 90.0,
+                 visual_type: str = 'wind_vortex', rune_tree=None,
+                 dir_x: float = 0.0, dir_y: float = 0.0):
+        self.origin_x      = float(x)
+        self.origin_y      = float(y)
+        self.x             = float(x)
+        self.y             = float(y)
+        self.damage        = damage
+        self.AoE_RADIUS    = radius
+        self.duration      = duration
+        self.vortex_stacks = vortex_stacks
+        self.pull_strength = pull_strength
+        self.visual_type   = visual_type
+        self.rune_tree     = rune_tree
+        self.alive         = True
+        self.elapsed       = 0.0
+        self.is_crit       = False
+        self._hit_ids: set[int] = set()
+        # Hướng trôi: theo hướng đường đạn nếu có, không thì random (Ice/Lightning
+        # không có khái niệm "đường đạn" nên fallback hướng ngẫu nhiên).
+        self._travel_angle = (math.atan2(dir_y, dir_x) if (dir_x or dir_y)
+                              else random.uniform(0.0, math.tau))
+        self._zigzag_phase = random.uniform(0.0, math.tau)   # lệch pha lượn ngẫu nhiên
+        self._wobble        = 0.0   # độ lệch ngang ngẫu nhiên cộng dồn nhẹ (random walk)
+
+    def update(self, dt: float) -> None:
+        self.elapsed += dt
+        if self.elapsed >= self.duration:
+            self.alive = False
+            return
+        # Trôi chậm về phía trước theo hướng đường đạn.
+        self.origin_x += math.cos(self._travel_angle) * self.DRIFT_SPEED * dt
+        self.origin_y += math.sin(self._travel_angle) * self.DRIFT_SPEED * dt
+
+        # Random walk nhẹ trên độ lệch ngang -> zigzag không đều tăm tắp.
+        self._wobble += random.uniform(-self.WOBBLE_JITTER, self.WOBBLE_JITTER) * dt
+        limit = self.WOBBLE_LIMIT
+        self._wobble = max(-limit, min(limit, self._wobble))
+
+        # Lượn zigzag vuông góc hướng trôi, cộng thêm độ lệch ngẫu nhiên.
+        perp = self._travel_angle + math.pi / 2
+        lateral = math.sin(self.elapsed * self.ZIGZAG_SPEED + self._zigzag_phase)
+        lateral = (lateral + self._wobble) * self.ZIGZAG_AMPLITUDE
+        self.x = self.origin_x + math.cos(perp) * lateral
+        self.y = self.origin_y + math.sin(perp) * lateral
+
+    @property
+    def phase(self) -> str:
+        return 'grow' if self.elapsed < self.GROW_DUR else 'active'
+
+    @property
+    def anim_progress(self) -> float:
+        return min(1.0, self.elapsed / max(0.001, self.duration))
+
+    def check_hits(self, enemies: list, boss) -> list:
+        """Damage 1 lần lúc quái mới bước vào vùng — dùng chung interface AoE."""
+        targets = [e for e in enemies if e.alive]
+        if boss and boss.alive:
+            targets.append(boss)
+        hits = []
+        for entity in targets:
+            if id(entity) in self._hit_ids:
+                continue
+            if math.hypot(entity.x - self.x, entity.y - self.y) <= entity.radius + self.AoE_RADIUS:
+                hits.append(entity)
+                self._hit_ids.add(id(entity))
+        return hits
+
+    def apply_pull(self, enemies: list, boss) -> None:
+        """Gọi mỗi frame — hút MỌI quái đang trong vùng về tâm (kể cả đã bị
+        damage rồi), tách biệt khỏi check_hits (chỉ bắn 1 lần)."""
+        from logic.entities.status_effect import StatusEffect
+        targets = [e for e in enemies if e.alive]
+        if boss and boss.alive:
+            targets.append(boss)
+        for entity in targets:
+            if math.hypot(entity.x - self.x, entity.y - self.y) <= self.AoE_RADIUS:
+                vortex              = StatusEffect('vortex', 0.0, duration=0.3)
+                vortex.center_x     = self.x
+                vortex.center_y     = self.y
+                vortex.pull_strength = self.pull_strength
+                vortex.stacks       = self.vortex_stacks
+                entity.add_status(vortex)
 
 
 # ── ImpactEffect (visual only) ────────────────────────────────────────────────

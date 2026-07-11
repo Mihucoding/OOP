@@ -165,9 +165,6 @@ class StatUpgrade:
     def get_color(self) -> tuple:
         return RARITY_COLOR[self.rarity]
 
-    def get_icon(self) -> str:
-        return self._icon
-
     # ── Áp dụng lên player ────────────────────────────────────────────────────
 
     def apply(self, player) -> None:
