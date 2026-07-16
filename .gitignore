@@ -14,3 +14,8 @@ CHAT_SUMMARY.md
 promt/
 .DS_Store
 **/.DS_Store
+
+# Sound asset packs — chi commit rieng cac file dang dung (hit_co.mp3 + 3 .ogg)
+assets/sounds/*.zip
+assets/sounds/Free Fantasy SFX Pack By TomMusic/
+assets/sounds/Free Sample Pack/
