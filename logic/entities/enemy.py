@@ -4,7 +4,7 @@ from logic.entities.status_effect import StatusEffect
 
 class Enemy:
     RADIUS    = 20
-    BASE_HP   = 50
+    BASE_HP   = 200
     BASE_SPEED = 80
     XP_VALUE  = 10
 
@@ -38,6 +38,14 @@ class Enemy:
         self.xp_dropped = False
 
     def update(self, dt: float, player_x: float, player_y: float) -> None:
+        """
+        Cập nhật logic của quái vật mỗi frame.
+        - Xử lý các hiệu ứng trạng thái (StatusEffects) đang bị nhiễm: trừ máu từ từ nếu bị thiêu đốt (Burn), làm chậm (Slow/Chill), hoặc làm choáng (Stun).
+        - Nếu không bị choáng, tìm đường (AI) di chuyển về phía người chơi.
+        - Cập nhật thời gian chờ đòn đánh (nếu có).
+
+        👉 BƯỚC TIẾP THEO (Bước 10): Quái vật di chuyển xong, hệ thống sẽ quay về `_update` của GameLoop để bắn đạn nếu bạn click chuột trái. Mở lại file [ui/game_loop.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/ui/game_loop.py) hàm `_spawn_bullet`.
+        """
         self.hurt_timer = max(0.0, self.hurt_timer - dt)
         if self.state == 'die':
             self.die_timer += dt
@@ -98,10 +106,17 @@ class Enemy:
             if self.cooldown_timer <= 0:
                 self.state = 'run'
 
-    def take_damage(self, amount: float) -> None:
+    def take_damage(self, amount: float, flinch: bool = True) -> None:
+        """
+        Hàm xử lý khi quái nhận sát thương cơ bản từ viên đạn.
+        Trừ máu, hiện số sát thương nảy lên (Floating Text) và giật lùi quái một chút (flinch).
+
+        👉 BƯỚC TIẾP THEO (Bước 17): Sát thương cơ bản đã xong, giờ là lúc kích hoạt sát thương và hiệu ứng từ ngọc. Hãy quay lại file [logic/rune/rune_tree.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/logic/rune/rune_tree.py) đọc hàm `on_hit`.
+        """
         if self.hp <= 0: return # Đang chết rồi
         self.hp -= amount
-        self.hurt_timer = 0.3
+        if flinch:
+            self.hurt_timer = 0.3
         if self.hp <= 0:
             self.hp = 0
             self.state = 'die'
@@ -110,12 +125,13 @@ class Enemy:
             self.cast_lock_timer = 0.0
 
     def add_status(self, effect: StatusEffect) -> None:
-        # Nếu đã có effect cùng loại → refresh remaining + tăng stacks (burn/chill)
+        # Nếu đã có effect cùng loại → refresh remaining + cộng dồn stacks (burn/chill)
+        # theo ĐÚNG lượng effect mới mang theo (burn: +1/lần; chill: +CHILL_PER_HIT/lần).
         for eff in self.status_effects:
             if eff.type == effect.type:
                 eff.remaining = max(eff.remaining, effect.remaining)
                 if eff.type in ('burn', 'chill'):
-                    eff.stacks = min(eff.stacks + 1, eff.max_stacks)
+                    eff.stacks = min(eff.stacks + effect.stacks, eff.max_stacks)
                 return
         self.status_effects.append(effect)
 

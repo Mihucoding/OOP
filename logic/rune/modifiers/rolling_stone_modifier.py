@@ -15,6 +15,7 @@ class RollingStoneModifier(ModifierRune):
     """
     IS_TRIGGER     = True
     TRIGGER_ON     = "spawn"
+    OWNS_SUBTREE   = True    # nhánh con áp lên tảng đá, không lên đạn cha
     DAMAGE_PERCENT = 0.25   # % damage gốc của chiêu
     DURATION       = 5.0    # giây đá lăn tồn tại
     ROLL_RADIUS    = 22.0   # bán kính va chạm — to hơn đạn thường
@@ -24,12 +25,13 @@ class RollingStoneModifier(ModifierRune):
     # ── Đạn có quỹ đạo (Fire) ────────────────────────────────────────────────
 
     def on_fire(self, bullet, context: dict) -> list:
-        # KHÔNG tự append vào context — trả boulder ra qua return để RuneTree
-        # tiếp tục áp rune con (VD HeavyHitter) lên đúng viên đá này, bất kể
-        # RollingStone đứng cha hay con trong cây.
+        # Trả tảng đá + đạn phụ do NHÁNH CON sinh ra (VD lưỡi kiếm quay quanh
+        # chính tảng đá). Nhánh con áp lên tảng đá, không đụng đạn chính.
         boulder = self.trigger_once(bullet.x, bullet.y, bullet.damage, context,
                                     dir_x=bullet.vx, dir_y=bullet.vy)
-        return [boulder] if boulder is not None else []
+        if boulder is None:
+            return []
+        return [boulder] + self._attach_subtree_and_fire(boulder, context)
 
     def on_update(self, bullet, dt: float, context: dict = None) -> None:
         pass   # chỉ nổ lúc spawn — không lặp theo quãng đường

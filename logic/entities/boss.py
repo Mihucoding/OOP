@@ -93,6 +93,10 @@ class Boss(Enemy):
                 if move_len > 0:
                     move_x /= move_len
                     move_y /= move_len
+                if move_x > 0:
+                    self.facing_dir = 1
+                elif move_x < 0:
+                    self.facing_dir = -1
                 self.x += move_x * Boss.CHARGE_SPEED * dt
                 self.y += move_y * Boss.CHARGE_SPEED * dt
         else:
@@ -110,6 +114,10 @@ class Boss(Enemy):
                 if move_len > 0:
                     move_x /= move_len
                     move_y /= move_len
+                if move_x > 0:
+                    self.facing_dir = 1
+                elif move_x < 0:
+                    self.facing_dir = -1
                 self.x += move_x * self.speed * slow * dt
                 self.y += move_y * self.speed * slow * dt
 

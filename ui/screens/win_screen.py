@@ -10,6 +10,12 @@ class WinScreen:
         self.font_small = font_small
 
     def draw(self, time_survived: float) -> None:
+        """
+        Màn hình chiến thắng! (End Game)
+        Hàm này vẽ dòng chữ "YOU WIN!", thông báo thời gian sống sót và hướng dẫn cách quay lại menu chính.
+        
+        🎉 CHÚC MỪNG BẠN! Bạn đã đi hết vòng đời mã nguồn từ lúc khởi tạo đến tận lúc Win Game!
+        """
         self.screen.fill((0, 15, 0))
 
         # Tiêu đề

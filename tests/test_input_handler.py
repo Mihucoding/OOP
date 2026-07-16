@@ -21,12 +21,14 @@ class TestInputHandler(unittest.TestCase):
     def test_get_mouse_world_pos(self, mock_get_pos):
         mock_get_pos.return_value = (800, 600)
         handler = InputHandler()
-        # SCREEN_W = 1280, SCREEN_H = 720
-        # world_x = 800 + 1000 - 640 = 1160
-        # world_y = 600 + 1000 - 360 = 1240
+        # SCREEN_W = 640, SCREEN_H = 360, PIXEL_SCALE = 2
+        # mouse_x = 800 / 2 = 400
+        # mouse_y = 600 / 2 = 300
+        # world_x = (400 - 320) / 1.0 + 1000 = 1080.0
+        # world_y = (300 - 180) / 1.0 + 1000 = 1120.0
         wx, wy = handler.get_mouse_world_pos(1000.0, 1000.0)
-        self.assertEqual(wx, 1160)
-        self.assertEqual(wy, 1240)
+        self.assertEqual(wx, 1080.0)
+        self.assertEqual(wy, 1120.0)
 
 if __name__ == '__main__':
     unittest.main()

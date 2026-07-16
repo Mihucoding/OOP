@@ -7,7 +7,7 @@ class FastEnemy(Enemy):
     Có cơ chế gồng (windup) và lướt tới cắn (lunge).
     """
     RADIUS = 15
-    BASE_HP = 30
+    BASE_HP = 36
     BASE_SPEED = 150
     XP_VALUE = 15
     COLOR = (255, 255, 0) # YELLOW

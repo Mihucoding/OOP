@@ -3,6 +3,7 @@ import random
 
 from logic.rune.rune_component import ModifierRune
 from logic.rune.modifiers.self_centered_modifier import orbit_steer
+from logic.rune.modifiers.twist_of_fate_modifier import TwistOfFateModifier
 
 class _OrbitingBladeMovement(ModifierRune):
     """Behavior nội bộ (không vào ALL_RUNES) — gắn vào cây rune riêng của mỗi
@@ -12,6 +13,15 @@ class _OrbitingBladeMovement(ModifierRune):
 
     def on_update(self, bullet, dt: float, context: dict = None) -> None:
         orbit_steer(bullet, dt)
+        # Twist of Fate gắn vào Flash of Swords: lưỡi kiếm lớn dần theo thời
+        # gian sống, giống "Increase Size x1.5 over lifetime" trên đạn thường.
+        stack = getattr(bullet, '_twist_stack', 0)
+        if stack:
+            if not hasattr(bullet, '_twist_base_radius'):
+                bullet._twist_base_radius = bullet.radius
+            ratio  = min(1.0, bullet.elapsed / max(0.001, bullet.LIFETIME))
+            growth = 1.0 + (TwistOfFateModifier.SIZE_MULT - 1.0) * stack * ratio
+            bullet.radius = bullet._twist_base_radius * growth
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
         pass
@@ -64,10 +74,12 @@ class FlashOfSwordsTrigger(ModifierRune):
                      dir_x: float = None, dir_y: float = None,
                      angle_jitter_deg: float = 0.0,
                      speed_mult: float = 1.0, size_mult: float = 1.0,
-                     duration_mult: float = 1.0, source=None):
+                     duration_mult: float = 1.0, spiral_stack: int = 0, source=None):
         """Tạo 1 tia kiếm QUAY QUANH NGUỒN tại (x, y) và TRẢ VỀ (người gọi thêm
         vào danh sách đạn). source: đối tượng để quay quanh (boomerang/đạn) —
-        None thì quay quanh chính điểm cast (Ice/Lightning)."""
+        None thì quay quanh chính điểm cast (Ice/Lightning). spiral_stack: cộng
+        dồn từ Twist of Fate nếu nó gắn dưới Flash of Swords — bẻ cong lưỡi
+        kiếm + cộng thêm Duration/Size như thẻ Twist of Fate."""
         from logic.entities.bullet import Bullet
         from logic.rune.rune_tree import RuneTree
 
@@ -106,6 +118,9 @@ class FlashOfSwordsTrigger(ModifierRune):
         blade._orbit_target    = source        # theo nguồn (boomerang) mỗi frame
         blade.player_x         = cx
         blade.player_y         = cy
+        if spiral_stack:
+            blade.LIFETIME    += TwistOfFateModifier.DURATION_BONUS * spiral_stack
+            blade._twist_stack = spiral_stack   # renderer: bẻ cong lưỡi kiếm
         return blade
 
     def get_display_name(self) -> str: return "Flash of Swords"

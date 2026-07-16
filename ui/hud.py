@@ -19,27 +19,6 @@ class HUD:
         self.ui_assets = {}
         self._load_ui_assets()
 
-        # Tải Meat Resource làm icon hiển thị số lượng thịt trên HUD
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        meat_path = os.path.join(
-            root_dir,
-            "assets",
-            "map",
-            "Tiny Swords (Free Pack)",
-            "Terrain",
-            "Resources",
-            "Meat",
-            "Meat Resource",
-            "Meat Resource.png",
-        )
-        self.meat_icon = None
-        if os.path.exists(meat_path):
-            try:
-                meat_img = pygame.image.load(meat_path).convert_alpha()
-                self.meat_icon = pygame.transform.scale(meat_img, (18, 18))
-            except Exception:
-                pass
-
     def _load_ui_assets(self) -> None:
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         ui_dir = os.path.join(
@@ -161,18 +140,6 @@ class HUD:
         lv_text = self.font.render(f"Lv.{player.level}", True, (190, 255, 160))
         self.screen.blit(lv_text, (bar_x + self.BAR_W + 8, xp_y - 2))
 
-        # Vẽ bộ đếm số lượng thịt thu thập được
-        meat_count = getattr(player, "meat_count", 0)
-        lv_w = lv_text.get_width()
-        meat_x = bar_x + self.BAR_W + 8 + lv_w + 16
-        if self.meat_icon:
-            self.screen.blit(self.meat_icon, (meat_x, xp_y - 2))
-            count_text = self.font.render(f"x {meat_count}", True, (255, 160, 80))
-            self.screen.blit(count_text, (meat_x + 22, xp_y - 2))
-        else:
-            count_text = self.font.render(f"Meat: {meat_count}", True, (255, 160, 80))
-            self.screen.blit(count_text, (meat_x, xp_y - 2))
-
         # ── Wave (góc phải trên) ───────────────────────────────────────────────
         wave_surf = self.font.render(wave_info, True, (255, 220, 80))
         wave_rect = wave_surf.get_rect(topright=(SCREEN_W - 10, 10))
@@ -184,29 +151,6 @@ class HUD:
             self._draw_overload_bar(player, stats_y)
             stats_y += 22
         self._draw_stats(player, stats_y)
-
-        # ── Danh sách Rune của chiêu active ──────────────────────────────────
-        rune_y    = stats_y + 44
-        active_spell = player.get_active_spell()
-        spell_surf = self.font.render(
-            f"{active_spell.name}: {active_spell.rune_tree.describe()}",
-            True, (180, 220, 255))
-        self.screen.blit(spell_surf, (bar_x, rune_y))
-        rune_y += 22
-
-        all_runes = active_spell.rune_tree.get_all_runes()
-        if not all_runes:
-            hint = self.font.render("Tab: Open Rune Builder", True, (120, 120, 120))
-            self.screen.blit(hint, (bar_x, rune_y))
-        else:
-            for rune in all_runes:
-                stack = getattr(rune, 'stack', getattr(rune, 'element_stack', 1))
-                label = rune.get_display_name()
-                if stack > 1:
-                    label += f"  x{stack}"
-                surf = self.font.render(label, True, rune.get_color())
-                self.screen.blit(surf, (bar_x, rune_y))
-                rune_y += 22
 
         # ── Spell bar (bottom center) ─────────────────────────────────────────
         self._draw_spell_bar(player)

@@ -6,7 +6,7 @@ class TankEnemy(Enemy):
     Màu UI: BROWN.
     """
     RADIUS = 35
-    BASE_HP = 200
+    BASE_HP = 240
     BASE_SPEED = 40
     XP_VALUE = 30
     COLOR = (139, 69, 19) # Brown

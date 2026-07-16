@@ -1,2 +1,1 @@
 pygame-ce>=2.4.0
-perlin-noise>=1.13,<1.14

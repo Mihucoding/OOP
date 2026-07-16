@@ -21,7 +21,8 @@ class CastParams:
     Count' của MỖI rune vẫn giữ đúng đội hình riêng (cone toả ngẫu nhiên hay
     line dàn hàng), không bị rune còn lại "ghi đè" đội hình."""
     __slots__ = ('damage_mult', 'speed_mult', 'size_mult', 'batches',
-                 'orbit', 'orbit_radius', 'orbit_duration', 'duration_mult')
+                 'orbit', 'orbit_radius', 'orbit_duration', 'duration_mult',
+                 'spiral_stack')
 
     def __init__(self):
         self.damage_mult = 1.0
@@ -35,6 +36,9 @@ class CastParams:
         self.orbit_radius   = 0.0
         self.orbit_duration = 0.0
         self.duration_mult  = 1.0   # nhân thời lượng bản spawn (Trigger dùng)
+        # Twist of Fate gắn vào Trigger (VD Flash of Swords): cộng dồn stack
+        # để Trigger tự quyết cách thể hiện "spiral" (VD lưỡi kiếm bẻ cong hơn).
+        self.spiral_stack   = 0
 
     @property
     def spawn_count(self) -> int:
@@ -96,6 +100,13 @@ class RuneTree:
     # ── Áp dụng cây ──────────────────────────────────────────────────────────
 
     def on_fire(self, bullet, context: dict) -> list:
+        """
+        Duyệt qua tất cả ngọc Modifier trong cây để xem có ngọc nào kích hoạt ngay khi đạn vừa bắn ra không.
+        Ví dụ: Ngọc Split sẽ làm đạn tách thành nhiều viên ngay tại đây.
+        Trả về danh sách đạn sinh thêm (nếu có).
+
+        👉 BƯỚC TIẾP THEO (Bước 13): Ngọc khởi tạo đạn xong, hệ thống sẽ di chuyển đạn mỗi frame. Hãy mở file [logic/entities/bullet.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/logic/entities/bullet.py) hàm `update` để xem nó.
+        """
         """Gọi khi đạn bắn. Trả về list đạn phụ (cast-graph rune tạo thêm)."""
         new_bullets: list = []
         for mod in self._fire_order(self.modifiers):
@@ -233,25 +244,63 @@ class RuneTree:
             for i, spawn in enumerate(root_spawns):
                 self._start_orbit(spawn, root_params, base_angle, i, len(root_spawns))
 
+        extra_bullets.extend(self.dispatch_trigger_firings(
+            bullet.x, bullet.y, bullet.vx, bullet.vy, bullet.damage,
+            root_params.spawn_count, trigger_params, trigger_reference, order,
+            context, source=bullet))
+
+        return extra_bullets
+
+    def dispatch_trigger_firings(
+        self,
+        origin_x: float, origin_y: float,
+        dir_x: float, dir_y: float,
+        effective_damage: float,
+        root_spawn_count: int,
+        trigger_params: dict, trigger_reference: dict, order: list,
+        context: dict,
+        source=None,
+        fos_origin: tuple | None = None,
+    ) -> list:
+        """Tính lịch bắn (resolve_trigger_firings) RỒI gọi trigger_once() cho
+        MỌI lần kích hoạt — DÙNG CHUNG cho cả 4 hệ: Fire/Wind (có Bullet thật,
+        source=bullet) qua resolve_and_fire_cast_graph(), và Ice/Lightning
+        (không có Bullet, source=None, tự tính origin/dir_x/dir_y thủ công từ
+        vị trí spike/hướng ngắm) qua game_loop._release_ice_charge /
+        _channel_lightning_attack. ĐÂY LÀ NƠI DUY NHẤT gọi trigger_once() với
+        đầy đủ tham số (dir_x/dir_y ảnh hưởng RollingStone/PerfectStorm/Flash
+        of Swords; spiral_stack ảnh hưởng Twist of Fate gắn dưới 1 Trigger) —
+        sửa/thêm tham số ở đây tự động áp dụng cho MỌI hệ, không viết tay lặp
+        lại từng nơi (trước đây Ice/Lightning tự viết bản riêng, thiếu mất
+        dir_x/dir_y + spiral_stack so với bản gốc này).
+        fos_origin: vị trí neo riêng cho Flash of Swords khi KHÔNG có Bullet
+        để tự theo dõi (Ice: điểm cuối gai băng; Lightning: điểm chạm địch gần
+        nhất trên tia) — Fire/Wind bỏ qua (None), vì lưỡi kiếm tự bám theo
+        `source` mỗi frame rồi."""
+        from logic.rune.modifiers.flash_of_swords_trigger import FlashOfSwordsTrigger
+        base_angle = math.atan2(dir_y, dir_x)
         firings = self.resolve_trigger_firings(
-            bullet.damage, root_params.spawn_count, trigger_params, trigger_reference, order)
+            effective_damage, root_spawn_count, trigger_params, trigger_reference, order)
+        extra: list = []
         for node, base_dmg, params in firings:
+            ox, oy = fos_origin if (fos_origin is not None and isinstance(node, FlashOfSwordsTrigger)) \
+                else (origin_x, origin_y)
             batches = self._orbit_even_batches(node, params.batches)
-            positions = self.resolve_batch_positions(bullet.x, bullet.y, base_angle, batches)
+            positions = self.resolve_batch_positions(ox, oy, base_angle, batches)
             for tx, ty, jitter_deg in positions:
                 spawned = node.trigger_once(
                     tx, ty, base_dmg, context,
-                    dir_x=bullet.vx, dir_y=bullet.vy,
+                    dir_x=dir_x, dir_y=dir_y,
                     angle_jitter_deg=jitter_deg,
                     speed_mult=params.speed_mult,
                     size_mult=params.size_mult,
                     duration_mult=params.duration_mult,
-                    source=bullet,
+                    spiral_stack=params.spiral_stack,
+                    source=source,
                 )
                 if spawned is not None:
-                    extra_bullets.append(spawned)
-
-        return extra_bullets
+                    extra.append(spawned)
+        return extra
 
     @staticmethod
     def _orbit_even_batches(node, batches):
@@ -298,6 +347,10 @@ class RuneTree:
             if hasattr(node, 'contribute_cast'):
                 node.contribute_cast(target)
             next_ref = current_ref
+        # Trigger OWNS_SUBTREE: nhánh con thuộc cast-graph RIÊNG của đạn phụ (chạy
+        # khi đạn phụ được bắn), không tham gia cast-graph của đạn cha.
+        if getattr(node, 'OWNS_SUBTREE', False):
+            return
         for child in node.get_children():
             self._walk_cast_graph(child, next_ref, root_params,
                                   trigger_params, trigger_reference, order)
@@ -319,9 +372,19 @@ class RuneTree:
         b.radius             = bullet.radius
         b.pierce_remaining   = getattr(bullet, 'pierce_remaining', 0)
         b.element_stack      = bullet.element_stack
+        # Giữ đúng hình ảnh của bản gốc (VD cầu lửa Furious Outburst được Frenetic
+        # nhân thêm vẫn là fire_bolt chứ không rớt về circle mặc định).
+        if hasattr(bullet, 'visual_type'):
+            b.visual_type = bullet.visual_type
         return b
 
     def on_update(self, bullet, dt: float, context: dict = None) -> None:
+        """
+        Duyệt qua các ngọc Modifier mỗi frame để thay đổi quỹ đạo hoặc thuộc tính của đạn đang bay.
+        Ví dụ: Ngọc Spiral sẽ làm đạn bay theo quỹ đạo xoắn ốc (như boomerang).
+
+        👉 BƯỚC TIẾP THEO (Bước 15): Nếu đạn không bị biến mất và đụng trúng quái vật thì sao? Hãy xem hàm `_handle_bullet_collisions` trong file [ui/game_loop.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/ui/game_loop.py).
+        """
         """Gọi mỗi frame để cập nhật quỹ đạo đạn.
         context (tùy chọn) cho modifier tự sinh thêm đạn ngay trong on_update
         (VD: FuriousOutburstModifier nổ thêm cầu lửa theo quãng đường đã bay)."""
@@ -329,6 +392,13 @@ class RuneTree:
             self._traverse_update(mod, bullet, dt, context, depth=1)
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
+        """
+        Được gọi khi đạn chạm vào người quái.
+        Duyệt qua các ngọc Element (Ví dụ: Lửa, Băng, Điện) và truyền sát thương hoặc hiệu ứng lên quái.
+        Đồng thời duyệt qua các ngọc Modifier (Ví dụ: Bounce) để xem đạn có nảy sang con quái khác không.
+
+        👉 BƯỚC TIẾP THEO (Bước 18): Để biết 1 viên ngọc cụ thể trừ máu ra sao, hãy mở thử [logic/rune/elements/fire_rune.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/logic/rune/elements/fire_rune.py) và đọc hàm `on_hit` của nó.
+        """
         """
         Gọi khi đạn trúng quái.
         Áp dụng TẤT CẢ Elements (mỗi cái dùng element_stack của riêng nó),
@@ -352,6 +422,11 @@ class RuneTree:
         new = node.on_fire(bullet, context) or []
         if new:
             result.extend(new)
+        # Trigger OWNS_SUBTREE (Furious Outburst/Rolling Stone) tự áp nhánh con
+        # lên ĐẠN PHỤ của nó trong on_fire — cây của đạn cha KHÔNG đụng vào nhánh
+        # con nữa (tránh rò rỉ buff lên đạn chính & double cast-graph).
+        if getattr(node, 'OWNS_SUBTREE', False):
+            return
         children = self._fire_order(node.get_children())
         for child in children:
             self._traverse_fire(child, bullet, context, result, depth + 1)
@@ -366,6 +441,8 @@ class RuneTree:
         if depth > self.MAX_DEPTH:
             return
         node.on_update(bullet, dt, context)
+        if getattr(node, 'OWNS_SUBTREE', False):
+            return   # nhánh con chạy trên đạn phụ của trigger, không trên đạn cha
         for child in node.get_children():
             self._traverse_update(child, bullet, dt, context, depth + 1)
 
@@ -373,6 +450,8 @@ class RuneTree:
         if depth > self.MAX_DEPTH:
             return
         node.on_hit(bullet, enemy, context)
+        if getattr(node, 'OWNS_SUBTREE', False):
+            return   # nhánh con xử lý trúng đòn trên đạn phụ, không trên đạn cha
         for child in node.get_children():
             self._traverse_hit(child, bullet, enemy, context, depth + 1)
 

@@ -4,7 +4,8 @@ import math
 class SpellBuild:
     """Một chiêu riêng: có slot rune, RuneTree, và cooldown độc lập."""
 
-    BASE_FIRE_RATE = 0.5   # giây giữa 2 lần bắn mặc định
+    BASE_FIRE_RATE      = 0.5    # giây giữa 2 lần bắn mặc định (Ice/Lightning/Wind)
+    FIRE_BASE_FIRE_RATE = 0.22   # Fire: đánh nhanh — bù lại tầm ngắn (xem FIRE_BULLET_LIFETIME)
 
     def __init__(self, name: str, slot_defs=None):
         from logic.rune.rune_slots import RuneSlots
@@ -31,7 +32,9 @@ class SpellBuild:
 
     def _recalculate_fire_rate(self) -> None:
         from logic.rune.modifiers.haste_rune import HasteRune
-        self.fire_rate = self.BASE_FIRE_RATE
+        from logic.rune.elements.fire_rune import FireRune
+        core = self.rune_slots.get(0).rune
+        self.fire_rate = self.FIRE_BASE_FIRE_RATE if isinstance(core, FireRune) else self.BASE_FIRE_RATE
         for s in self.rune_slots.slots:
             if isinstance(s.rune, HasteRune) and self.rune_slots.is_active(s.id):
                 self.fire_rate = s.rune.calc_fire_rate()
@@ -74,6 +77,7 @@ class Player:
         self.hurt_timer = 0.0
         self.attack_timer = 0.0
         self.cast_lock_timer = 0.0
+        self.cast_anim = None   # None | 'fire' — renderer chọn animation vung tay khi cast
         self.lightning_overload = 0.0
         self.lightning_overloaded = False
         self.noclip_mode = False
@@ -107,11 +111,18 @@ class Player:
 
         # Thông báo "có rune mới" để HUD hiển thị
         self.has_new_rune = False
-        self.meat_count = 0
 
     # ── Movement & fire ───────────────────────────────────────────────────────
 
     def update(self, dt: float, move_x: float, move_y: float) -> None:
+        """
+        Cập nhật trạng thái của người chơi mỗi frame.
+        - Xử lý gia tốc, ma sát để tính toán vận tốc (vel_x, vel_y) mượt mà dựa vào move_x, move_y nhận được.
+        - Cập nhật tọa độ (x, y) mới.
+        - Giảm dần thời gian chờ của các kỹ năng (cooldown chiêu, lướt, bất tử tạm thời).
+        
+        👉 BƯỚC TIẾP THEO (Bước 9): Sau khi cập nhật người chơi, vòng lặp _update của GameLoop sẽ gọi cập nhật Quái Vật. Hãy mở [logic/entities/enemy.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/logic/entities/enemy.py) hàm `update` để xem AI quái hoạt động thế nào.
+        """
         move_len = math.hypot(move_x, move_y)
         cast_locked = self.cast_lock_timer > 0
         if move_x < 0:
@@ -208,7 +219,7 @@ class Player:
     # ── HP ────────────────────────────────────────────────────────────────────
 
     def take_damage(self, amount: float) -> None:
-        if getattr(self, "noclip_mode", False):
+        if getattr(self, "noclip_mode", False) or getattr(self, "god_mode", False):
             return
         reduced = amount * (1.0 - self.armor / 100.0)
         self.hp -= reduced

@@ -7,6 +7,11 @@ class XPOrb:
     COLLECT_RADIUS = 40    # tự thu khi player trong bán kính này
     MAGNET_RADIUS  = 180   # bắt đầu hút về phía player khi trong bán kính này
     MAGNET_SPEED   = 250   # tốc độ bay về phía player (pixel/s)
+    # Ma sát văng lúc rơi (px/s²) — đủ mạnh để orb chỉ "nảy" ra một chút quanh
+    # chỗ quái chết rồi dừng hẳn trong ~0.1-0.2s, KHÔNG trôi dạt xa (giá trị cũ
+    # 4.0 quá yếu: ở tốc độ văng tối đa quãng đường trôi trước khi dừng lên tới
+    # hàng ngàn pixel, orb trôi mất hút khỏi vị trí rơi).
+    SCATTER_FRICTION = 900.0
 
     def __init__(self, x: float, y: float, value: int,
                  vx: float = 0.0, vy: float = 0.0):
@@ -21,8 +26,6 @@ class XPOrb:
         # Vận tốc ban đầu (scatter effect)
         self.vx = vx
         self.vy = vy
-        # Giảm dần vận tốc scatter
-        self._scatter_friction = 4.0
 
     def update(self, dt: float, player_x: float, player_y: float,
                extra_magnet: float = 0.0) -> None:
@@ -42,7 +45,7 @@ class XPOrb:
             self.x  += self.vx * dt
             self.y  += self.vy * dt
             speed    = math.hypot(self.vx, self.vy)
-            friction = self._scatter_friction * dt
+            friction = self.SCATTER_FRICTION * dt
             if speed > friction:
                 ratio   = (speed - friction) / speed
                 self.vx *= ratio

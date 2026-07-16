@@ -7,12 +7,13 @@ class WindRune(ElementRune):
     Rune Gió — gây slow khi trúng đạn.
     Stack: chọn 2 lần → slow lâu hơn.
     """
-    # Bounce: boomerang đã xuyên + tự quay về → "nảy sang địch gần nhất" vô nghĩa.
+    # Hit-And-Run: boomerang phản xạ (bẻ góc) khi chạm chướng ngại vật ở pha
+    # bay ra, coi như bắn mới từ điểm chạm tường (range reset) — xem
+    # game_loop._update_bullet_wall_bounce.
     # SelfCentered giờ THAM GIA cast graph nên KHÔNG còn ép boomerang quay:
     #   boomerang (CAN_ORBIT=False) chỉ nhận +count/+duration; còn khi Self-
     #   Centered làm con của 1 Trigger (VD Flash of Swords) thì chỉ tia kiếm
     #   quay quanh boomerang — hợp lệ. Vì vậy bỏ cấm SelfCentered ở đây.
-    FORBIDDEN_MODIFIERS = ("BounceModifier",)
 
     SLOW_FACTOR   = 0.5     # quái còn 50% tốc độ
     SLOW_DURATION = 2.0     # giây

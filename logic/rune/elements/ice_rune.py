@@ -7,30 +7,41 @@ from logic.entities.status_effect import StatusEffect
 class IceRune(ElementRune):
     """Ice element. Basic bullets chill; active slot casts a hold-charge spike."""
 
-    # Bounce: spike không phải đạn bay nên không thể nảy.
+    # Hit-And-Run: gai băng phản xạ (bẻ góc) khi chạm chướng ngại vật trên map,
+    # đi tiếp theo hướng phản xạ với range reset về full — xem
+    # game_loop._reflect_segment_chain / _cap_ice_attack_at_first_enemy.
     # SelfCentered giờ là cast-graph modifier: gắn thẳng spike thì vô hại, nhưng
     # gắn dưới 1 Trigger (VD Flash of Swords) thì tia kiếm vẫn quay được → cho phép.
     # TwistOfFate: KHÔNG xoay vận tốc/lớn dần ở đây (spike đứng yên) — thay vào
     # đó là công tắc chuyển gai thẳng sang đòn xoáy vòng (build_spiral_charge_attack).
-    FORBIDDEN_MODIFIERS = ("BounceModifier",)
 
     SLOW_FACTOR = 0.6
     SLOW_DURATION = 3.0
 
-    CHARGE_MAX_TIME = 1.25
+    CHARGE_MAX_TIME = 0.4   # giây gồng để đạt full charge — khớp thẻ "Duration: 0.0s <-> 0.4s"
     MIN_LENGTH = 130.0
     MAX_LENGTH = 360.0
     HITBOX_WIDTH = 78.0
     START_OFFSET = 44.0
-    MIN_DAMAGE_MULT = 0.9
-    MAX_DAMAGE_MULT = 2.35
+    # Sát thương TUYỆT ĐỐI (không ăn theo player.damage) — mức chưa buff rune
+    # gì, charge càng lâu càng gần 250 (khớp thẻ "Damage: 0 <-> 250"). Buff từ
+    # rune modifier (HeavyHitter, Frenetic...) vẫn nhân thêm bên ngoài như cũ.
+    MIN_DAMAGE = 0.0
+    MAX_DAMAGE = 250.0
+    # "Apply 25 Chill" trên thẻ: mỗi lần trúng cộng 25 điểm chill, đủ
+    # CHILL_FREEZE_THRESHOLD (100) là đóng băng hoàn toàn (slow_factor = 0) —
+    # xem StatusEffect (stacks/max_stacks) + Enemy.add_status.
+    CHILL_PER_HIT          = 25
+    CHILL_FREEZE_THRESHOLD = 100
+    SPEED = 40   # chỉ số hiển thị trên thẻ (tốc độ "load" hiệu ứng băng) — chưa gắn cơ chế thật
 
     def on_hit(self, bullet, enemy, context: dict) -> None:
         chill = StatusEffect(
             effect_type="chill",
             damage_per_sec=0.0,
             duration=self.SLOW_DURATION,
-            slow_factor=self.SLOW_FACTOR ** bullet.element_stack,
+            stacks=self.CHILL_PER_HIT * bullet.element_stack,
+            max_stacks=self.CHILL_FREEZE_THRESHOLD,
         )
         enemy.add_status(chill)
 
@@ -87,8 +98,8 @@ class IceRune(ElementRune):
                 (end_x - perp_x * half_w, end_y - perp_y * half_w),
                 (start_x - perp_x * half_w, start_y - perp_y * half_w),
             ],
-            "damage_mult": self.MIN_DAMAGE_MULT
-            + (self.MAX_DAMAGE_MULT - self.MIN_DAMAGE_MULT) * length_ratio,
+            "damage_base": self.MIN_DAMAGE
+            + (self.MAX_DAMAGE - self.MIN_DAMAGE) * length_ratio,
         }
 
     def build_spiral_charge_attack(
@@ -135,8 +146,8 @@ class IceRune(ElementRune):
             "dir_y": dy,
             "start_x": caster_x,  # Tâm vòng tròn
             "start_y": caster_y,
-            "damage_mult": self.MIN_DAMAGE_MULT
-            + (self.MAX_DAMAGE_MULT - self.MIN_DAMAGE_MULT) * charge_ratio,
+            "damage_base": self.MIN_DAMAGE
+            + (self.MAX_DAMAGE - self.MIN_DAMAGE) * charge_ratio,
         }
 
     def targets_in_ice_spiral(self, attack: dict, enemies: list) -> list:
@@ -173,7 +184,8 @@ class IceRune(ElementRune):
             effect_type="chill",
             damage_per_sec=0.0,
             duration=self.SLOW_DURATION * (1.0 + 0.35 * charge_ratio),
-            slow_factor=self.SLOW_FACTOR ** stack,
+            stacks=self.CHILL_PER_HIT * stack,
+            max_stacks=self.CHILL_FREEZE_THRESHOLD,
         )
         enemy.add_status(chill)
 
@@ -181,7 +193,12 @@ class IceRune(ElementRune):
         return "Ice Rune"
 
     def get_description(self) -> str:
-        return "Hold to grow an ice spike hitbox. Longer charge increases range and damage."
+        return ("Shards of ice, that can be charged to hit foes from a great distance.\n"
+                f"◆ Damage: {int(self.MIN_DAMAGE)} <-> {int(self.MAX_DAMAGE)}\n"
+                f"◆ Duration: 0.0s <-> {self.CHARGE_MAX_TIME}s\n"
+                f"◆ Speed: {self.SPEED}\n"
+                f"◆ Apply {self.CHILL_PER_HIT} Chill\n"
+                "◆ The longer the charge, the greater its damage and range")
 
     def get_color(self) -> tuple:
         return (100, 200, 255)

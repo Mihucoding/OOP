@@ -116,6 +116,17 @@ class ModifierRune(RuneComponent):
     IS_TRIGGER: bool = False
     TRIGGER_ON: str = ""   # 'spawn' | 'distance' | 'hit'... (chỉ Trigger đặt)
 
+    # Trigger "đơn giản" (Furious Outburst, Rolling Stone) tự bắn ra 1 ĐẠN PHỤ
+    # (cầu lửa / tảng đá) mang quỹ đạo riêng, KHÔNG qua cast-graph như Flash of
+    # Swords / Perfect Storm. Với các trigger này, mọi rune con phải áp lên chính
+    # đạn phụ đó (đúng luật "neo vào Trigger gần nhất phía trên"), nên chúng "sở
+    # hữu" nhánh con: RuneTree bỏ qua nhánh con khi duyệt cây của đạn CHA, còn
+    # trigger tự gắn nhánh con vào cây riêng của đạn phụ và kích hoạt (xem
+    # _attach_subtree_and_fire). Nhờ vậy Flash of Swords dưới Furious Outburst
+    # sẽ quay quanh từng cầu lửa, buff (Heavy Hitter) chỉ áp cho cầu lửa chứ
+    # không rò rỉ lên đạn chính, v.v.
+    OWNS_SUBTREE: bool = False
+
     def __init__(self):
         self._children: list[RuneComponent] = []
         # Số lần cùng loại Modifier này được chọn/lắp — hiệu ứng nhân theo
@@ -142,3 +153,19 @@ class ModifierRune(RuneComponent):
 
     def get_children(self) -> list:
         return self._children
+
+    def _attach_subtree_and_fire(self, projectile, context: dict) -> list:
+        """Dùng bởi trigger OWNS_SUBTREE: gắn nhánh con của trigger vào cây riêng
+        của ĐẠN PHỤ (projectile) rồi kích hoạt on_fire trên chính nó — buff áp
+        thẳng lên đạn phụ, còn cast-graph trigger con (Flash/Perfect Storm) neo
+        vào đạn phụ (quay quanh nó / nổ tại nó) với % tính theo damage của đạn
+        phụ. Trả về danh sách đạn phụ do nhánh con sinh thêm (VD lưỡi kiếm)."""
+        children = self.get_children()
+        if not children:
+            return []
+        from logic.rune.rune_tree import RuneTree
+        if getattr(projectile, 'rune_tree', None) is None:
+            projectile.rune_tree = RuneTree()
+        for child in children:
+            projectile.rune_tree.add_modifier(child)
+        return projectile.rune_tree.on_fire(projectile, context)

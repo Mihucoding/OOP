@@ -58,8 +58,7 @@ class WindBoomerang:
 
         # Tương thích với rune_tree.on_hit / on_update interface
         self.element_stack   = 1
-        self.bounce_redirect = False
-        self.bounce_count    = 0   # phòng thủ (Bounce bị cấm trên Wind)
+        self.bounce_count    = 0   # HitAndRunModifier: số lần đã phản xạ khỏi tường (game_loop tự đếm)
         self.spiral_angle    = 0.0
 
     def update(self, dt: float, context: dict = None) -> None:
@@ -109,11 +108,18 @@ class WindBoomerang:
         if id(enemy) in self._hit_ids:
             return False
         self._hit_ids.add(id(enemy))
-        self.bounce_redirect = False
         if self.rune_tree:
             self.rune_tree.on_hit(self, enemy, context)
         # Boomerang giữ alive sau khi trúng
         return True
+
+    def redirect(self, new_vx: float, new_vy: float) -> None:
+        # game_loop gọi khi boomerang phản xạ khỏi tường (HitAndRunModifier),
+        # CHỈ ở pha 'out' (xem game_loop._update_bullet_wall_bounce): đổi
+        # hướng bay + reset quãng đường đã đi, như phóng phát mới từ đó.
+        self.vx            = new_vx
+        self.vy            = new_vy
+        self.dist_traveled = 0.0
 
     def _point_to_player(self) -> None:
         dx = self.player_x - self.x

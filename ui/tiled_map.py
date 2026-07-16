@@ -22,6 +22,43 @@ FOAM_FRAME_MS = 95
 TREE_FRAME_MS = 140
 
 
+def _segment_vs_rect(x1: float, y1: float, x2: float, y2: float, rect):
+    """Slab test đoạn thẳng (x1,y1)->(x2,y2) vs 1 pygame.Rect. Trả về
+    (t, normal_x, normal_y) tại điểm cắt GẦN (x1,y1) nhất trong đoạn
+    (t trong [0,1]), hoặc None nếu không cắt. Normal luôn trục X hoặc Y
+    (±1, 0) hay (0, ±1) — dùng để phản xạ vector vận tốc/hướng bay."""
+    dx = x2 - x1
+    dy = y2 - y1
+    t_near, t_far = 0.0, 1.0
+    nx, ny = 0.0, 0.0
+
+    for axis, (origin, delta, lo, hi) in enumerate((
+        (x1, dx, rect.left, rect.right),
+        (y1, dy, rect.top, rect.bottom),
+    )):
+        if delta == 0:
+            if origin < lo or origin > hi:
+                return None
+            continue
+        t1 = (lo - origin) / delta
+        t2 = (hi - origin) / delta
+        face_sign = -1.0
+        if t1 > t2:
+            t1, t2 = t2, t1
+            face_sign = 1.0
+        if t1 > t_near:
+            t_near = t1
+            nx, ny = (face_sign, 0.0) if axis == 0 else (0.0, face_sign)
+        if t2 < t_far:
+            t_far = t2
+        if t_near > t_far:
+            return None
+
+    if t_near < 0.0 or t_near > 1.0 or (nx == 0.0 and ny == 0.0):
+        return None
+    return t_near, nx, ny
+
+
 class TiledMap:
     """Small TMX renderer for finite, orthogonal, CSV tile maps."""
 
@@ -394,6 +431,20 @@ class TiledMap:
                 "sort_y": self.origin_y + (island_cy + 2) * self.tile_height,
             })
 
+            # NHÀ THỨ HAI: Lệch sang bên trái 8 ô gạch
+            mon_x2 = mon_x - 8 
+            mon_y2 = mon_y
+            self.decorations.append({
+                "kind": "monastery",
+                "frames": self.monastery_sprites,
+                "frame_ms": 999999,
+                "phase": 0,
+                "x": mon_x2,
+                "y": mon_y2,
+                "sort_y": mon_y2 + sprite.get_height(),
+            })
+
+
         # Đặt 1-2 loại cây xung quanh đảo động theo tọa độ đảo tìm được (đảm bảo không đè nhau)
         if len(self.tree_sprites) >= 2:
             # Cây 1 ở phía sau bên trái đảo
@@ -554,6 +605,24 @@ class TiledMap:
                 rect_bottom = prop["y"] + bounds.bottom
                 rect_y = rect_bottom - rect_h
             self.collision_rects.append(pygame.Rect(rect_x, rect_y, rect_w, rect_h))
+
+    def raycast_reflect(self, x1: float, y1: float, x2: float, y2: float):
+        """Tìm chướng ngại vật GẦN ĐIỂM BẮT ĐẦU NHẤT mà đoạn thẳng
+        (x1,y1)->(x2,y2) cắt qua (dùng cho HitAndRunModifier — đạn/tia phản
+        xạ khi chạm tường). CHỈ xét self.collision_rects (cây/đá/tu viện...),
+        KHÔNG xét rìa map — bay ra ngoài map thì cứ để ra, không tính là tường.
+        Trả về (hit_x, hit_y, normal_x, normal_y) hoặc None nếu không cắt gì."""
+        best_t = None
+        best_hit = None
+        for rect in self.collision_rects:
+            hit = _segment_vs_rect(x1, y1, x2, y2, rect)
+            if hit is None:
+                continue
+            t, nx, ny = hit
+            if best_t is None or t < best_t:
+                best_t = t
+                best_hit = (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, nx, ny)
+        return best_hit
 
     def collides_circle(self, x: float, y: float, radius: float) -> bool:
         if (

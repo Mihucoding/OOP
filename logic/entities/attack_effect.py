@@ -21,7 +21,6 @@ class _HitProxy:
     def __init__(self, effect):
         self.element_stack   = 1
         self.bounce_count    = 0
-        self.bounce_redirect = False
         self.alive           = True
         self.x               = effect.x
         self.y               = effect.y
@@ -29,9 +28,6 @@ class _HitProxy:
         angle = getattr(effect, 'angle_rad', 0.0)
         self.vx = math.cos(angle)
         self.vy = math.sin(angle)
-
-    def redirect(self, new_vx: float, new_vy: float) -> None:
-        pass   # beam/eruption không bị redirect
 
 
 # ── LightningBeam ─────────────────────────────────────────────────────────────
@@ -58,9 +54,6 @@ class LightningBeam:
         self.is_crit     = False
         self.visual_type = 'lightning_beam'
         self._hit_ids: set[int] = set()
-        # BounceModifier chain
-        self.chain_count = 0    # số lần đã chain
-        self.max_chain   = 0    # giới hạn (được set từ BounceModifier.stack)
 
     def update(self, dt: float) -> None:
         self.elapsed += dt
@@ -128,7 +121,7 @@ class IceEruption:
         self.is_crit     = False
         self.visual_type = 'ice_eruption'
         self._hit_ids: set[int]    = set()
-        # BounceModifier: mini eruption tracking
+        # Hit-And-Run: mini eruption tracking
         self.is_mini              = is_mini   # True → không spawn mini lại (tránh đệ quy)
         self._mini_spawned: set[int] = set()
 
@@ -230,6 +223,76 @@ class AoEBurst:
         return hits
 
 
+# ── FireTrailEffect — vệt lửa LIÊN TỤC dọc đường đi (Destructive Path) ───────
+
+class FireTrailEffect:
+    """
+    Một dải điểm nối liền nhau dọc theo đường đạn/gai/tia đã đi qua — KHÔNG
+    phải nhiều AoEBurst rời rạc. Mỗi điểm tự "già" độc lập rồi biến mất sau
+    TRAIL_DURATION giây kể từ lúc được thêm vào, nên vệt lửa trông như mọc dài
+    theo sau nguồn rồi mờ dần từ đuôi lên đầu, thay vì chớp tắt từng cục.
+
+    - Fire/Wind (đạn có quỹ đạo thật): add_point() gọi mỗi frame trong
+      on_update, đạn đi tới đâu vệt hiện ra tới đó.
+    - Ice/Lightning (đòn tức thời, không có Bullet): DestructivePathModifier
+      tự rải nhiều điểm 1 lần dọc chiều dài gai/tia qua leave_trail_along().
+    """
+    TICK_INTERVAL = 0.35   # giây giữa 2 lần Burn liên tiếp lên CÙNG 1 địch
+
+    def __init__(self, x: float, y: float, radius: float,
+                 trail_duration: float, rune_tree=None):
+        self.points: list[list[float]] = [[float(x), float(y), 0.0]]
+        self.radius         = radius
+        self.trail_duration = trail_duration
+        self.rune_tree       = rune_tree
+        self.damage          = 0.0   # vệt lửa không gây damage trực tiếp, chỉ áp Burn
+        self.alive            = True
+        self.is_crit           = False
+        self.visual_type       = 'fire_trail'
+        self._hit_cooldowns: dict[int, float] = {}
+
+    @property
+    def x(self) -> float: return self.points[-1][0] if self.points else 0.0
+
+    @property
+    def y(self) -> float: return self.points[-1][1] if self.points else 0.0
+
+    def add_point(self, x: float, y: float, min_spacing: float = 0.0) -> None:
+        if self.points:
+            lx, ly, _age = self.points[-1]
+            if math.hypot(x - lx, y - ly) < min_spacing:
+                return
+        self.points.append([float(x), float(y), 0.0])
+
+    def update(self, dt: float) -> None:
+        for p in self.points:
+            p[2] += dt
+        self.points = [p for p in self.points if p[2] < self.trail_duration]
+        if not self.points:
+            self.alive = False
+        for eid in list(self._hit_cooldowns.keys()):
+            remaining = self._hit_cooldowns[eid] - dt
+            if remaining <= 0:
+                del self._hit_cooldowns[eid]
+            else:
+                self._hit_cooldowns[eid] = remaining
+
+    def check_hits(self, enemies: list, boss) -> list:
+        targets = [e for e in enemies if e.alive]
+        if boss and boss.alive:
+            targets.append(boss)
+        hits = []
+        for entity in targets:
+            if id(entity) in self._hit_cooldowns:
+                continue
+            for x, y, _age in self.points:
+                if math.hypot(entity.x - x, entity.y - y) <= entity.radius + self.radius:
+                    hits.append(entity)
+                    self._hit_cooldowns[id(entity)] = self.TICK_INTERVAL
+                    break
+        return hits
+
+
 # ── VortexZone — lốc xoáy đứng yên, hút quái về tâm (Perfect Storm) ──────────
 
 class VortexZone:
@@ -250,6 +313,7 @@ class VortexZone:
     ZIGZAG_SPEED     = 2.4    # rad/s — tần số lượn ngang
     WOBBLE_JITTER    = 0.8    # rad/s — tốc độ đổi độ lệch ngẫu nhiên (random walk)
     WOBBLE_LIMIT     = 0.6    # kẹp biên độ lệch ngẫu nhiên (tỉ lệ ZIGZAG_AMPLITUDE)
+    TORNADO_COUNT    = 6      # số cây lốc nhỏ trong cụm (renderer vẽ theo layout này)
 
     def __init__(self, x: float, y: float, damage: float, radius: float,
                  duration: float, vortex_stacks: int,
@@ -277,6 +341,17 @@ class VortexZone:
                               else random.uniform(0.0, math.tau))
         self._zigzag_phase = random.uniform(0.0, math.tau)   # lệch pha lượn ngẫu nhiên
         self._wobble        = 0.0   # độ lệch ngang ngẫu nhiên cộng dồn nhẹ (random walk)
+        # Cụm lốc nhỏ (renderer vẽ mỗi cây lốc tại tâm + offset này) — tạo 1 lần
+        # lúc spawn, KHÔNG đổi mỗi frame, để trông như 1 cụm lốc thật chứ không
+        # phải vòng tròn đối xứng đều xoay quanh tâm.
+        self._tornado_layout: list[tuple] = []
+        for _ in range(self.TORNADO_COUNT):
+            ang   = random.uniform(0.0, math.tau)
+            dist  = random.uniform(0.0, 0.55)      # cụm gần tâm, không lan hết bán kính
+            scale = random.uniform(0.45, 0.85)
+            phase = random.uniform(0.0, math.tau)
+            self._tornado_layout.append(
+                (math.cos(ang) * dist, math.sin(ang) * dist, scale, phase))
 
     def update(self, dt: float) -> None:
         self.elapsed += dt
@@ -480,58 +555,6 @@ class FireBreathJet:
             ang_to = math.atan2(dy, dx)
             diff   = abs((ang_to - self.angle_rad + math.pi) % (2 * math.pi) - math.pi)
             if diff <= self.HALF_ANGLE:
-                hits.append(e)
-                self._hit_ids.add(id(e))
-        return hits
-
-
-# ── AirBurstEffect — luồng gió charged (giữ LMB) ──────────────────────────────
-
-class AirBurstEffect:
-    """
-    Luồng gió bay thẳng, xuyên enemy và đẩy lùi (knockback).
-    Độ dài/knockback phụ thuộc charge_ratio (0..1) lúc tạo.
-    """
-
-    BASE_SPEED = 560.0
-
-    def __init__(self, x: float, y: float, angle_rad: float,
-                 damage: float, charge_ratio: float, rune_tree=None):
-        self.x            = float(x)
-        self.y            = float(y)
-        self.angle_rad    = angle_rad
-        self.charge_ratio = max(0.0, min(1.0, charge_ratio))
-        self.vx           = math.cos(angle_rad) * self.BASE_SPEED
-        self.vy           = math.sin(angle_rad) * self.BASE_SPEED
-        self.damage       = damage
-        self.rune_tree    = rune_tree
-        self.alive        = True
-        self.elapsed      = 0.0
-        self.is_crit      = False
-        self.visual_type  = 'air_burst'
-        # Charge cao → bay xa hơn + knockback mạnh + hitbox lớn
-        self.lifetime     = 0.30 + self.charge_ratio * 0.55     # 0.30..0.85s
-        self.knockback    = 150.0 + self.charge_ratio * 250.0   # 150..400px
-        self.hit_radius   = 28 + self.charge_ratio * 30         # 28..58
-        self.apply_stun   = self.charge_ratio >= 0.85
-        self._hit_ids: set[int] = set()
-
-    def update(self, dt: float) -> None:
-        self.x       += self.vx * dt
-        self.y       += self.vy * dt
-        self.elapsed += dt
-        if self.elapsed >= self.lifetime:
-            self.alive = False
-
-    def check_hits(self, enemies: list, boss) -> list:
-        targets = [e for e in enemies if e.alive]
-        if boss and boss.alive:
-            targets.append(boss)
-        hits = []
-        for e in targets:
-            if id(e) in self._hit_ids:
-                continue
-            if math.hypot(e.x - self.x, e.y - self.y) <= e.radius + self.hit_radius:
                 hits.append(e)
                 self._hit_ids.add(id(e))
         return hits

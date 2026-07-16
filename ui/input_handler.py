@@ -6,9 +6,14 @@ class InputHandler:
     """Đọc input từ keyboard + mouse, trả về game commands."""
 
     def get_move_direction(self) -> tuple:
-        # Đọc pygame.key.get_pressed()
-        # W→(0,-1), S→(0,1), A→(-1,0), D→(1,0), kết hợp chéo
-        # Trả về (move_x, move_y) chưa normalize
+        """
+        Đọc sự kiện từ bàn phím để biết người chơi đang bấm phím nào (W, A, S, D).
+        Tính toán vector hướng di chuyển (move_x, move_y).
+        Ví dụ: Bấm D -> (1, 0). Bấm W và A -> (-1, -1).
+        Vector này sẽ được truyền lại cho hàm _update ở GameLoop.
+
+        👉 BƯỚC TIẾP THEO (Bước 7): Quay trở lại file [ui/game_loop.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/ui/game_loop.py) hàm `_update` để xem nó lấy (move_x, move_y) này truyền cho Player thế nào.
+        """
         keys = pygame.key.get_pressed()
         move_x = keys[pygame.K_d] - keys[pygame.K_a]
         move_y = keys[pygame.K_s] - keys[pygame.K_w]

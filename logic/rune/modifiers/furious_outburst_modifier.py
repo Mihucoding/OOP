@@ -19,6 +19,7 @@ class FuriousOutburstModifier(ModifierRune):
     """
     IS_TRIGGER       = True
     TRIGGER_ON       = "distance"
+    OWNS_SUBTREE     = True     # nhánh con áp lên từng cầu lửa, không lên đạn cha
     TRIGGER_DISTANCE = 120.0   # px giữa 2 lần nổ (đạn có quỹ đạo)
     DAMAGE_PERCENT   = 0.20    # % damage gốc của đạn/chiêu
     BURN_STACK       = 1
@@ -28,11 +29,13 @@ class FuriousOutburstModifier(ModifierRune):
 
     def on_fire(self, bullet, context: dict) -> list:
         bullet._outburst_traveled = 0.0
-        # KHÔNG tự append vào context ở đây — trả fireball ra qua return để
-        # RuneTree._traverse_fire tiếp tục áp các rune con (VD HeavyHitter) lên
-        # đúng viên fireball này, bất kể Outburst đứng cha hay con trong cây.
+        # Trả fireball + đạn phụ do NHÁNH CON sinh ra (VD lưỡi kiếm Flash of
+        # Swords quay quanh chính cầu lửa). Nhánh con (buff/cast-graph) được áp
+        # lên cầu lửa qua _attach_subtree_and_fire, không đụng đạn chính.
         fireball = self.trigger_once(bullet.x, bullet.y, bullet.damage, context)
-        return [fireball] if fireball is not None else []
+        if fireball is None:
+            return []
+        return [fireball] + self._attach_subtree_and_fire(fireball, context)
 
     def on_update(self, bullet, dt: float, context: dict = None) -> None:
         if context is None:
@@ -42,11 +45,12 @@ class FuriousOutburstModifier(ModifierRune):
         threshold = self.TRIGGER_DISTANCE
         while traveled >= threshold:
             traveled -= threshold
-            # Ở đây buff lúc bắn đã áp xong từ lâu (on_fire chạy 1 lần duy nhất
-            # lúc spawn) nên không còn vấn đề thứ tự — append thẳng là đủ.
             fireball = self.trigger_once(bullet.x, bullet.y, bullet.damage, context)
             if fireball is not None:
                 context['bullets'].append(fireball)
+                # Mỗi cầu lửa đẻ dọc đường cũng mang nhánh con của nó
+                context['bullets'].extend(
+                    self._attach_subtree_and_fire(fireball, context))
         bullet._outburst_traveled = traveled
 
     # ── Đạn tức thời (Lightning / Ice) — game_loop gọi thẳng hàm này ─────────
@@ -79,8 +83,10 @@ class FuriousOutburstModifier(ModifierRune):
     def get_display_name(self) -> str: return "Furious Outburst"
 
     def get_description(self) -> str:
+        # Khớp y chang thẻ gốc (nội dung + format bullet ◆, mỗi stat 1 dòng).
         pct = int(self.DAMAGE_PERCENT * 100 * self.stack)
-        return (f"Every {int(self.TRIGGER_DISTANCE)}px traveled (or once per cast for "
-                f"instant attacks), casts a fireball: {pct}% dmg + Burn (Cost: {self.POINT_COST})")
+        return ("Casts fireballs in random directions.\n"
+                f"◆ Damage: {pct}%\n"
+                f"◆ Apply {self.BURN_STACK} Burn")
 
     def get_color(self) -> tuple: return (255, 140, 40)

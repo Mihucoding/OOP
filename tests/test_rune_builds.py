@@ -8,8 +8,9 @@ from logic.entities.enemy import Enemy
 from logic.entities.player import Player
 from logic.rune.elements.fire_rune import FireRune
 from logic.rune.elements.ice_rune import IceRune
-from logic.rune.modifiers.bounce_modifier import BounceModifier
+from logic.rune.modifiers.hit_and_run_modifier import HitAndRunModifier
 from logic.rune.modifiers.twist_of_fate_modifier import TwistOfFateModifier
+from logic.rune.modifiers.stars_aligned_modifier import StarsAlignedModifier
 from logic.rune.modifiers.haste_rune import HasteRune
 from logic.rune.rune_slots import RuneSlots
 from logic.rune.rune_tree import RuneTree
@@ -27,7 +28,7 @@ class TestRuneSlotRules(unittest.TestCase):
         # Slot 0 không nhận ModifierRune
         slots = RuneSlots()
         self.assertFalse(slots.place(0, TwistOfFateModifier()))
-        self.assertFalse(slots.place(0, BounceModifier()))
+        self.assertFalse(slots.place(0, HitAndRunModifier()))
 
     def test_branch_slots_reject_element_rune(self):
         # Slot 1/2/3/4 (nhánh) chỉ nhận Modifier, không nhận Element
@@ -39,13 +40,13 @@ class TestRuneSlotRules(unittest.TestCase):
         # Slot 1/2 đặt được ngay khi Slot 0 trống
         slots = RuneSlots()
         self.assertTrue(slots.place(1, TwistOfFateModifier()))
-        self.assertTrue(slots.place(2, BounceModifier()))
+        self.assertTrue(slots.place(2, HitAndRunModifier()))
 
     def test_child_slot_no_longer_requires_parent(self):
         # Mới: node con đặt được ngay cả khi node cha trống (tự nối lên root)
         slots = RuneSlots()
         self.assertTrue(slots.place(3, TwistOfFateModifier()))
-        self.assertTrue(slots.place(4, BounceModifier()))
+        self.assertTrue(slots.place(4, HitAndRunModifier()))
 
     def test_slot0_optional_tree_still_fires(self):
         # Khi Slot 0 trống, cây vẫn có thể bắn (is_ready = True)
@@ -72,9 +73,12 @@ class TestRuneTreeBehavior(unittest.TestCase):
         self.assertNotEqual(bullet.vx, old_vx)
         self.assertNotEqual(bullet.vy, old_vy)
 
-    def test_bounce_only_tree_redirects_bullet(self):
+    def test_bounce_only_tree_does_not_redirect_on_enemy_hit(self):
+        # Hit-And-Run giờ là phản xạ TƯỜNG (game_loop xử lý), không còn nảy
+        # sang địch gần nhất trong on_hit() nữa — trúng địch thì chết như đạn
+        # thường (không có pierce/bounce nào can thiệp ở đây).
         slots = RuneSlots()
-        slots.place(2, BounceModifier())
+        slots.place(2, HitAndRunModifier())
         tree = slots.build_rune_tree()
         enemy_a = Enemy(100, 0)
         enemy_b = Enemy(200, 0)
@@ -84,9 +88,8 @@ class TestRuneTreeBehavior(unittest.TestCase):
 
         bullet.on_hit(enemy_a, {'enemies': [enemy_a, enemy_b], 'bullets': []})
 
-        self.assertTrue(bullet.alive)
-        self.assertEqual(bullet.bounce_count, 1)
-        self.assertGreater(bullet.vx, 0)
+        self.assertFalse(bullet.alive)
+        self.assertEqual(bullet.bounce_count, 0)
 
     def test_element_in_slot0_applies_burn(self):
         # Fire ở Slot 0 → gây burn khi trúng
@@ -106,7 +109,7 @@ class TestRuneTreeBehavior(unittest.TestCase):
         slots = RuneSlots()
         slots.place(0, FireRune())
         slots.place(1, TwistOfFateModifier())
-        slots.place(2, BounceModifier())
+        slots.place(2, HitAndRunModifier())
         tree = slots.build_rune_tree()
 
         self.assertEqual(len(tree.elements), 1)
@@ -117,7 +120,7 @@ class TestRuneTreeBehavior(unittest.TestCase):
         slots = RuneSlots()
         fire    = FireRune()
         spiral  = TwistOfFateModifier()
-        bounce  = BounceModifier()
+        bounce  = HitAndRunModifier()
         slots.place(0, fire)
         slots.place(1, spiral)
         slots.place(2, bounce)
@@ -128,7 +131,7 @@ class TestRuneTreeBehavior(unittest.TestCase):
         self.assertIn(fire, runes)
         # Spiral (L1, index thấp hơn) trước Bounce (R1) trong danh sách modifiers
         mod_names = [type(m).__name__ for m in tree.modifiers]
-        self.assertLess(mod_names.index("TwistOfFateModifier"), mod_names.index("BounceModifier"))
+        self.assertLess(mod_names.index("TwistOfFateModifier"), mod_names.index("HitAndRunModifier"))
 
 
 class TestPlayerSpells(unittest.TestCase):
@@ -139,7 +142,7 @@ class TestPlayerSpells(unittest.TestCase):
         self.assertEqual(len(player.spells), 2)
 
         player.spells[0].rune_slots.place(1, TwistOfFateModifier())
-        player.spells[1].rune_slots.place(1, BounceModifier())
+        player.spells[1].rune_slots.place(1, HitAndRunModifier())
         player.rebuild_all_spells()
 
         self.assertEqual(len(player.spells[0].rune_tree.modifiers), 1)
@@ -249,8 +252,9 @@ class TestSameElementStacking(unittest.TestCase):
 
 
 class TestModifierCompatibility(unittest.TestCase):
-    """Bounce chỉ hợp với đạn thường/Fire; beam (Lightning), spike (Ice),
-    boomerang (Wind) cấm Bounce (tránh crash & vô nghĩa)."""
+    """Hit-And-Run (phản xạ tường) hợp với cả 4 hệ — không còn bị cấm trên
+    beam (Lightning), spike (Ice), boomerang (Wind) như bản redirect-tới-địch
+    cũ nữa."""
 
     def _core(self, elem_cls):
         from logic.rune.rune_slots import slot_defs_for_rune
@@ -261,23 +265,23 @@ class TestModifierCompatibility(unittest.TestCase):
 
     def test_fire_accepts_bounce(self):
         s = self._core(FireRune)
-        self.assertTrue(s.place(1, BounceModifier()))
+        self.assertTrue(s.place(1, HitAndRunModifier()))
 
-    def test_lightning_rejects_bounce(self):
+    def test_lightning_accepts_bounce(self):
         from logic.rune.elements.lightning_rune import LightningRune
         s = self._core(LightningRune)
-        self.assertFalse(s.place(1, BounceModifier()))
-        self.assertTrue(s.place(1, TwistOfFateModifier()))
+        self.assertTrue(s.place(1, HitAndRunModifier()))
+        self.assertTrue(s.place(2, TwistOfFateModifier()))
 
-    def test_ice_rejects_bounce(self):
+    def test_ice_accepts_bounce(self):
         s = self._core(IceRune)
-        self.assertFalse(s.place(1, BounceModifier()))
+        self.assertTrue(s.place(1, HitAndRunModifier()))
 
-    def test_wind_rejects_bounce(self):
+    def test_wind_accepts_bounce(self):
         from logic.rune.elements.wind_rune import WindRune
         s = self._core(WindRune)
-        self.assertFalse(s.place(1, BounceModifier()))
-        self.assertTrue(s.place(1, TwistOfFateModifier()))
+        self.assertTrue(s.place(1, HitAndRunModifier()))
+        self.assertTrue(s.place(2, TwistOfFateModifier()))
 
 
 class TestAutoConnectBranch(unittest.TestCase):
@@ -336,49 +340,50 @@ class TestWindBoomerangModifiers(unittest.TestCase):
 
 class TestModifierPointBudget(unittest.TestCase):
     """Mỗi chiêu có ngân sách RuneSlots.MAX_POINTS (=5) điểm cho modifier.
-    Twist of Fate/Haste tốn 1 điểm; Bounce tốn 2 điểm."""
+    Twist of Fate/Haste/Bounce tốn 1 điểm; Stars Aligned tốn 2 điểm."""
 
     def test_costs_as_expected(self):
         self.assertEqual(TwistOfFateModifier.POINT_COST, 1)
         self.assertEqual(HasteRune.POINT_COST, 1)
-        self.assertEqual(BounceModifier.POINT_COST, 2)
+        self.assertEqual(HitAndRunModifier.POINT_COST, 1)
+        self.assertEqual(StarsAlignedModifier.POINT_COST, 2)
 
     def test_used_points_accumulates(self):
         slots = RuneSlots()
         slots.place(1, TwistOfFateModifier())   # +1
-        slots.place(2, BounceModifier())   # +2
+        slots.place(2, StarsAlignedModifier())  # +2
         self.assertEqual(slots.used_points(), 3)
 
     def test_blocks_placement_over_budget(self):
         slots = RuneSlots()   # 5 slot: 0(element),1,2,3,4 (modifier)
-        slots.place(1, BounceModifier())   # 2
-        slots.place(2, BounceModifier())   # 2 -> tong 4
-        slots.place(3, BounceModifier())   # +2 se vuot 5 -> phai bi chan
-        self.assertFalse(slots.can_place(4, BounceModifier()))
+        slots.place(1, StarsAlignedModifier())  # 2
+        slots.place(2, StarsAlignedModifier())  # 2 -> tong 4
+        slots.place(3, StarsAlignedModifier())  # +2 se vuot 5 -> phai bi chan
+        self.assertFalse(slots.can_place(4, StarsAlignedModifier()))
         self.assertIsNone(slots.get(4).rune)
 
     def test_allows_placement_exactly_at_budget(self):
         slots = RuneSlots()
-        slots.place(1, BounceModifier())   # 2
-        slots.place(2, BounceModifier())   # 2 -> tong 4
+        slots.place(1, StarsAlignedModifier())  # 2
+        slots.place(2, StarsAlignedModifier())  # 2 -> tong 4
         self.assertTrue(slots.place(3, TwistOfFateModifier()))  # +1 = 5, vua du
         self.assertEqual(slots.used_points(), 5)
 
     def test_removing_frees_budget(self):
         slots = RuneSlots()
-        slots.place(1, BounceModifier())   # 2
-        slots.place(2, BounceModifier())   # 2 -> tong 4
-        self.assertFalse(slots.place(3, BounceModifier()))  # +2 vuot 5 -> bi chan, slot 3 con trong
+        slots.place(1, StarsAlignedModifier())  # 2
+        slots.place(2, StarsAlignedModifier())  # 2 -> tong 4
+        self.assertFalse(slots.place(3, StarsAlignedModifier()))  # +2 vuot 5 -> bi chan, slot 3 con trong
         slots.remove(2)                     # tra lai 2 diem -> con 2 (tu slot 1)
-        self.assertTrue(slots.place(3, BounceModifier()))   # gio dat duoc (2+2=4 <=5)
+        self.assertTrue(slots.place(3, StarsAlignedModifier()))   # gio dat duoc (2+2=4 <=5)
 
     def test_swap_respects_budget(self):
         slots = RuneSlots()
-        slots.place(1, BounceModifier())   # 2
-        slots.place(2, BounceModifier())   # 2 -> tong 4
+        slots.place(1, StarsAlignedModifier())  # 2
+        slots.place(2, StarsAlignedModifier())  # 2 -> tong 4
         slots.place(3, TwistOfFateModifier())   # 1 -> tong 5 (dung khop)
-        # Doi Twist of Fate (cost1) thanh Bounce (cost2) se vuot ngan sach -> bi chan
-        self.assertIsNone(slots.swap(3, BounceModifier()))
+        # Doi Twist of Fate (cost1) thanh Stars Aligned (cost2) se vuot ngan sach -> bi chan
+        self.assertIsNone(slots.swap(3, StarsAlignedModifier()))
         # Doi Twist of Fate thanh Haste (cung cost1) van hop le
         self.assertIsNotNone(slots.swap(3, HasteRune()))
 
@@ -739,26 +744,34 @@ class TestDestructivePath(unittest.TestCase):
         ctx = {'enemies': [], 'bullets': [], 'active_effects': []}
         tree.on_fire(b, ctx)
         patch = ctx['active_effects'][0]
-        self.assertAlmostEqual(patch.TOTAL_LIFE, DestructivePathModifier.TRAIL_DURATION, places=2)
+        self.assertAlmostEqual(patch.trail_duration, DestructivePathModifier.TRAIL_DURATION, places=2)
 
-    def test_on_update_leaves_more_patches_by_distance(self):
+    def test_on_update_leaves_one_continuous_trail_growing_by_distance(self):
+        # Thiết kế mới: KHÔNG sinh nhiều active_effects rời rạc nữa — chỉ 1
+        # FireTrailEffect duy nhất, "dài" thêm ra bằng cách nối thêm điểm mỗi
+        # khi đạn đã bay đủ TRAIL_INTERVAL px (add_point() gọi qua on_update,
+        # cần bullet.x/y THẬT SỰ đổi giữa các lần gọi — dùng b.update() mô
+        # phỏng đúng vòng lặp thật thay vì gọi tree.on_update() 1 phát to).
         tree = self._tree()
         b = Bullet(0, 0, 100, 0, 20, tree)
         ctx = {'enemies': [], 'bullets': [], 'active_effects': []}
         tree.on_fire(b, ctx)
         self.assertEqual(len(ctx['active_effects']), 1)
-        tree.on_update(b, 1.0, ctx)   # 400px/s * 1s = 400px -> +8 (moi 45px)
-        self.assertEqual(len(ctx['active_effects']), 9)
+        trail = ctx['active_effects'][0]
+        self.assertEqual(len(trail.points), 1)
+        dt = 1 / 60.0
+        for _ in range(60):   # 400px/s * 1s = 400px quãng đường
+            b.update(dt, ctx)
+        self.assertEqual(len(ctx['active_effects']), 1)   # vẫn chỉ 1 effect
+        self.assertGreater(len(trail.points), 10)         # nhưng "dài" ra nhiều điểm
 
     def test_patch_applies_burn_when_active(self):
         from logic.rune.modifiers.destructive_path_modifier import DestructivePathModifier
         rune = DestructivePathModifier()
         ctx = {'active_effects': []}
-        rune.trigger_once(0, 0, 100, ctx)
-        patch = ctx['active_effects'][0]
-        patch.elapsed = patch.GROW_DUR + 0.001   # vao active phase
+        trail = rune._spawn_trail(0, 0, ctx)
         enemy = Enemy(0, 0)
-        hits = patch.check_hits([enemy], None)
+        hits = trail.check_hits([enemy], None)
         self.assertEqual(len(hits), 1)
 
 
@@ -775,25 +788,25 @@ class TestFreneticEnergyAndPerfectStorm(unittest.TestCase):
         slots.place(4, child_cls())
         return slots.build_rune_tree()
 
-    def test_storm_parent_frenetic_child_gives_3_storm_1_main(self):
+    def test_storm_parent_frenetic_child_gives_4_storm_1_main(self):
         from logic.rune.modifiers.perfect_storm_modifier import PerfectStormModifier
         from logic.rune.modifiers.frenetic_energy_modifier import FreneticEnergyModifier
         tree = self._tree(PerfectStormModifier, FreneticEnergyModifier)
         b = Bullet(0, 0, 100, 0, 10, tree)
         ctx = {'bullets': [], 'active_effects': []}
         new_bullets = tree.on_fire(b, ctx)
-        self.assertEqual(len(ctx['active_effects']), 3)   # Frenetic gan vao Storm
+        self.assertEqual(len(ctx['active_effects']), 4)   # Frenetic gan vao Storm (Spawn Count +3)
         self.assertEqual(1 + len(new_bullets), 1)          # Spell goc khong bi dung toi
 
-    def test_frenetic_parent_storm_child_gives_3_storm_3_main(self):
+    def test_frenetic_parent_storm_child_gives_4_storm_4_main(self):
         from logic.rune.modifiers.perfect_storm_modifier import PerfectStormModifier
         from logic.rune.modifiers.frenetic_energy_modifier import FreneticEnergyModifier
         tree = self._tree(FreneticEnergyModifier, PerfectStormModifier)
         b = Bullet(0, 0, 100, 0, 10, tree)
         ctx = {'bullets': [], 'active_effects': []}
         new_bullets = tree.on_fire(b, ctx)
-        self.assertEqual(1 + len(new_bullets), 3)          # Frenetic gan vao Spell goc
-        self.assertEqual(len(ctx['active_effects']), 3)    # Storm fire theo tung spawn
+        self.assertEqual(1 + len(new_bullets), 4)          # Frenetic gan vao Spell goc (Spawn Count +3)
+        self.assertEqual(len(ctx['active_effects']), 4)    # Storm fire theo tung spawn
 
     def test_frenetic_works_on_all_4_elements(self):
         # Ca Fire/Wind (Bullet/WindBoomerang qua rune_tree.on_fire) va Ice/
@@ -923,13 +936,13 @@ class TestFreneticStarsAlignedCombo(unittest.TestCase):
             b = Bullet(0, 0, 100, 0, 10, tree)
             speed0 = math.hypot(b.vx, b.vy)
             new_bullets = tree.on_fire(b, {'bullets': [], 'active_effects': []})
-            self.assertEqual(1 + len(new_bullets), 5)             # 1 + 2 + 2
+            self.assertEqual(1 + len(new_bullets), 6)             # 1 + 3 + 2
             self.assertAlmostEqual(b.damage, 10 * 0.8 * 0.7)      # giao hoan
             self.assertAlmostEqual(math.hypot(b.vx, b.vy), speed0 * 1.3)
             self.assertAlmostEqual(b.radius, Bullet.RADIUS * 0.5)
 
     def test_each_modifier_keeps_its_own_formation_regardless_of_order(self):
-        """5 vien = 1 goc (thang) + 2 cua Frenetic (toa cone, cung vi tri,
+        """6 vien = 1 goc (thang) + 3 cua Frenetic (toa cone, cung vi tri,
         huong bay lech ngau nhien) + 2 cua StarsAligned (dan hang, cung huong
         bay, vi tri lech nhau) — bat ke Frenetic hay StarsAligned dung cha/con."""
         from logic.rune.modifiers.frenetic_energy_modifier import FreneticEnergyModifier
@@ -945,7 +958,7 @@ class TestFreneticStarsAlignedCombo(unittest.TestCase):
             all_bullets = [b] + new_bullets
 
             same_pos_same_dir   = 0   # vien goc (thang, khong lech gi)
-            same_pos_diff_dir   = 0   # 2 vien cua Frenetic (toa cone)
+            same_pos_diff_dir   = 0   # 3 vien cua Frenetic (toa cone)
             diff_pos_same_dir   = 0   # 2 vien cua StarsAligned (dan hang)
             for nb in all_bullets:
                 same_pos = abs(nb.y - b.y) < 1e-6
@@ -958,7 +971,7 @@ class TestFreneticStarsAlignedCombo(unittest.TestCase):
                     diff_pos_same_dir += 1
 
             self.assertEqual(same_pos_same_dir, 1, f"{parent_cls.__name__} cha")
-            self.assertEqual(same_pos_diff_dir, 2, f"{parent_cls.__name__} cha")  # Frenetic
+            self.assertEqual(same_pos_diff_dir, 3, f"{parent_cls.__name__} cha")  # Frenetic
             self.assertEqual(diff_pos_same_dir, 2, f"{parent_cls.__name__} cha")  # StarsAligned
 
 
@@ -1092,21 +1105,45 @@ class TestOrderInvariants(unittest.TestCase):
                     f"{[c.__name__ for c in order]}: spawn dmg {got} != {expected} "
                     f"(buff phải áp cho spawner bất kể thứ tự)")
 
-    # ── Invariant 3: buff + Trigger neo nhau → cha/con đối xứng (1.5x0.2) ─────
+    # ── Invariant 3: buff + Trigger neo nhau → NESTING CÓ Ý NGHĨA ──────────────
+    #    Sát thương ĐẠN PHỤ trigger phun ra bằng nhau dù buff cha/con (1.5x0.2 =
+    #    0.2x1.5), NHƯNG với trigger tự-mang-đạn-phụ (OWNS_SUBTREE: Furious
+    #    Outburst, Rolling Stone), buff đặt TRÊN trigger còn buff luôn ĐẠN CHÍNH,
+    #    buff đặt DƯỚI chỉ buff đạn phụ. Cast-graph trigger (Perfect Storm) thì
+    #    đối xứng hoàn toàn (buff áp lên đạn chính ở cả 2 cách).
 
-    def test_buff_trigger_parent_child_symmetric(self):
+    def test_buff_trigger_nesting_semantics(self):
         from logic.rune.modifiers.heavy_hitter_modifier import HeavyHitterModifier
         from logic.rune.modifiers.furious_outburst_modifier import FuriousOutburstModifier
         from logic.rune.modifiers.rolling_stone_modifier import RollingStoneModifier
         from logic.rune.modifiers.perfect_storm_modifier import PerfectStormModifier
-        for trigger_cls in (FuriousOutburstModifier, RollingStoneModifier,
-                            PerfectStormModifier):
-            ab = self._sig_nest(HeavyHitterModifier, trigger_cls)
-            ba = self._sig_nest(trigger_cls, HeavyHitterModifier)
+
+        # _sig_nest → (n, main_dmg, spawn_dmgs, n_aoe, aoe_dmgs); đạn phụ nằm ở
+        # spawn_dmgs (đạn) hoặc aoe_dmgs (vortex).
+        def spawn_dmg(sig):
+            return sig[2] or sig[4]
+
+        # Trigger OWNS_SUBTREE: đạn phụ đối xứng, đạn chính KHÔNG.
+        for trigger_cls in (FuriousOutburstModifier, RollingStoneModifier):
+            ab = self._sig_nest(HeavyHitterModifier, trigger_cls)   # buff cha
+            ba = self._sig_nest(trigger_cls, HeavyHitterModifier)   # buff con
             self.assertEqual(
-                ab, ba,
-                f"HeavyHitter <> {trigger_cls.__name__}: cha/con KHÔNG đối xứng\n"
+                spawn_dmg(ab), spawn_dmg(ba),
+                f"{trigger_cls.__name__}: dmg đạn phụ phải bằng nhau (1.5x0.2)\n"
                 f"  HH cha: {ab}\n  {trigger_cls.__name__} cha: {ba}")
+            self.assertGreater(
+                ab[1], ba[1],
+                f"{trigger_cls.__name__}: buff TRÊN trigger phải buff đạn chính")
+            self.assertEqual(
+                ba[1], 20.0,
+                f"{trigger_cls.__name__}: buff DƯỚI trigger KHÔNG được đụng đạn chính")
+
+        # Cast-graph trigger (không OWNS_SUBTREE): đối xứng hoàn toàn.
+        ab = self._sig_nest(HeavyHitterModifier, PerfectStormModifier)
+        ba = self._sig_nest(PerfectStormModifier, HeavyHitterModifier)
+        self.assertEqual(
+            ab, ba,
+            f"PerfectStorm: cast-graph phải đối xứng\n  HH cha: {ab}\n  PS cha: {ba}")
 
     # ── Invariant 4: cast-graph tất định như nhau trên CẢ 4 HỆ ───────────────
     #    (resolve_cast_graph chỉ đọc modifiers → độc lập element; test này chốt
@@ -1223,13 +1260,23 @@ class TestStarsAlignedParallelAllElements(unittest.TestCase):
 
     def test_lightning_beams_parallel_not_cone(self):
         from logic.rune.elements.lightning_rune import LightningRune
+        from ui.game_loop import LIGHTNING_CAST_RELEASE_FRAME, LIGHTNING_CAST_FRAME_MS
         gl, sp = self._game_with(LightningRune)
         beams = []
         orig = gl._set_primary_lightning_beam
         gl._set_primary_lightning_beam = lambda sx, sy, ex, ey, beam_id=0, vortex=False: (
             beams.append((sx, sy, ex, ey)) or orig(sx, sy, ex, ey, beam_id=beam_id, vortex=vortex))
         gl._lightning_channel_active = False
-        gl._channel_lightning_attack(100.0, 0.0, 1 / 60)
+
+        # Tia chỉ thực sự xuất hiện SAU khi charge qua windup (xem
+        # LIGHTNING_CAST_RELEASE_FRAME) — giữ chuột đủ nhiều frame như
+        # gameplay thật thay vì gọi 1 lần duy nhất.
+        dt = 1 / 60
+        release_time = LIGHTNING_CAST_RELEASE_FRAME * LIGHTNING_CAST_FRAME_MS / 1000.0
+        steps = int(release_time / dt) + 2
+        for _ in range(steps):
+            beams.clear()
+            gl._channel_lightning_attack(100.0, 0.0, dt)
 
         def unit_dir(sx, sy, ex, ey):
             d = math.hypot(ex - sx, ey - sy)
@@ -1290,11 +1337,14 @@ class TestRuneTaxonomy(unittest.TestCase):
                 self.assertEqual(r.get_rune_kind(), 'trigger',
                                  f"{cls.__name__} là cast-graph trigger nhưng chưa IS_TRIGGER")
 
-    def test_destructive_path_is_modifier_despite_trigger_once(self):
-        # Dùng trigger_once cho tiện cơ chế nhưng vẫn là MODIFIER (đúng thiết kế).
+    def test_destructive_path_is_modifier_without_trigger_once(self):
+        # Dùng on_fire/on_update (Fire/Wind) + leave_trail_along() riêng
+        # (Ice/Lightning, game_loop tự gọi) — KHÔNG dùng cơ chế trigger_once
+        # chung nữa, nên phải bị loại khỏi _find_triggerable_modifiers().
         from logic.rune.modifiers.destructive_path_modifier import DestructivePathModifier
         r = DestructivePathModifier()
-        self.assertTrue(callable(getattr(r, 'trigger_once', None)))
+        self.assertFalse(hasattr(r, 'trigger_once'))
+        self.assertTrue(callable(getattr(r, 'leave_trail_along', None)))
         self.assertEqual(r.get_rune_kind(), 'modifier')
         self.assertEqual(r.get_trigger_label(), "")
 

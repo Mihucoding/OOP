@@ -11,7 +11,7 @@ class TestEntities(unittest.TestCase):
         effect = StatusEffect('poison', damage_per_sec=10.0, duration=2.0)
         effect.update(enemy, 0.5)
         self.assertEqual(effect.remaining, 1.5)
-        self.assertEqual(enemy.hp, 45.0) # 50 - (10 * 0.5)
+        self.assertEqual(enemy.hp, 195.0) # 200 - (10 * 0.5)
 
     def test_enemy_movement_with_slow(self):
         enemy = Enemy(0, 0)

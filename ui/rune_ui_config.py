@@ -46,6 +46,7 @@ GRID_POINTS = {
 # Thêm keyword mới = thêm 1 entry (khoá phải khớp chữ trong get_description).
 KEYWORD_INFO = {
     "Critical": "Deals critical damage (Base multiplier: x2).",
+    "Vortex": "Pulls targets toward the Spell's or Trigger's center.",
 }
 
 

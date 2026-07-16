@@ -14,6 +14,10 @@ class TwistOfFateModifier(ModifierRune):
     game_loop._has_spiral_modifier() dùng sự hiện diện của rune này làm công
     tắc chuyển gai/tia thẳng sang đòn xoáy vòng/vòng cung — kế thừa đúng vai
     trò cũ của SpiralModifier cho 2 hệ đó.
+    Gắn dưới Flash of Swords (Trigger tham gia cast graph, không phải đạn bay
+    thẳng): contribute_cast() cộng dồn vào CastParams.spiral_stack, Trigger đó
+    tự đọc để bẻ cong lưỡi kiếm + cộng Duration/Size lên tia kiếm nó sinh ra
+    (xem FlashOfSwordsTrigger.trigger_once/_OrbitingBladeMovement).
     """
     ROTATE_SPEED   = 180.0   # độ/giây — tốc độ xoay vận tốc (Fire/Wind)
     DURATION_BONUS = 1.0     # +1s mỗi stack
@@ -26,6 +30,13 @@ class TwistOfFateModifier(ModifierRune):
     @staticmethod
     def _duration_attr(bullet) -> str:
         return 'LIFETIME' if hasattr(bullet, 'LIFETIME') else 'MAX_LIFE'
+
+    def contribute_cast(self, cast_params) -> None:
+        # Gắn dưới 1 Trigger tham gia cast graph (VD Flash of Swords): tia
+        # kiếm không có "vận tốc" để tự xoay như đạn thường, nên Trigger tự
+        # đọc spiral_stack để quyết cách thể hiện "spiral" của riêng nó
+        # (VD lưỡi kiếm bẻ cong hơn — xem FlashOfSwordsTrigger.trigger_once).
+        cast_params.spiral_stack += self.stack
 
     def on_fire(self, bullet, context: dict) -> list:
         attr = self._duration_attr(bullet)

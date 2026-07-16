@@ -1,6 +1,6 @@
 import random
 
-from logic.rune.modifiers.bounce_modifier import BounceModifier
+from logic.rune.modifiers.hit_and_run_modifier import HitAndRunModifier
 from logic.rune.modifiers.twist_of_fate_modifier import TwistOfFateModifier
 from logic.rune.modifiers.haste_rune      import HasteRune
 from logic.rune.modifiers.lightened_heart_modifier import LightenedHeartModifier
@@ -19,7 +19,7 @@ from logic.leveling.stat_upgrade          import generate_stat_upgrade
 # Pool lên cấp: CHỈ Modifier — Element hệ chính đã chọn 1 lần lúc đầu ván
 # (Skill Select) và khóa cứng, không xuất hiện lại ở đây nữa.
 ALL_RUNES = [
-    BounceModifier, TwistOfFateModifier, HasteRune,
+    HitAndRunModifier, TwistOfFateModifier, HasteRune,
     LightenedHeartModifier, PiercingEyesModifier, FuriousOutburstModifier,
     HeavyHitterModifier, RollingStoneModifier, SelfCenteredModifier,
     DestructivePathModifier,

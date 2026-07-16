@@ -78,9 +78,12 @@ class PerfectStormModifier(ModifierRune):
     def get_display_name(self) -> str: return "Perfect Storm"
 
     def get_description(self) -> str:
+        # Khớp y chang thẻ gốc (nội dung + format bullet ◆, mỗi stat 1 dòng).
         pct = int(self.DAMAGE_PERCENT * 100 * self.stack)
-        return (f"Triggered on spawn: casts a tornado — {pct}% dmg, "
-                f"{int(self.DURATION)}s, pulls foes, Apply {self.VORTEX_STACKS} Vortex "
-                f"(Cost: {self.POINT_COST})")
+        return ("Casts a tornado that pulls foes toward its center.\n"
+                f"◆ Damage: {pct}%\n"
+                f"◆ Duration: {int(self.DURATION)}s\n"
+                f"◆ Size: {self.SIZE}\n"
+                f"◆ Apply {self.VORTEX_STACKS} Vortex")
 
     def get_color(self) -> tuple: return (120, 230, 150)

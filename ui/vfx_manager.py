@@ -18,49 +18,53 @@ _FIRE2  = os.path.join(_ASSETS, 'Fire Effect 2', 'Fire Effect 2')
 _WIND   = os.path.join(_ASSETS, 'Wind Effect 02', 'Wind Effect 02')
 
 # ── Thông số sprite sheet ─────────────────────────────────────────────────────
-# key → (path, frame_w, frame_h, frame_count, cols_per_row, fps, loop)
+# key → (path, frame_w, frame_h, frame_count, cols_per_row, fps, loop, frame_offset)
+# frame_offset: bỏ qua bao nhiêu ô đầu trước khi lấy frame_count ô (dùng khi
+# muốn lấy 1 đoạn giữa/cuối của cùng 1 sheet thay vì từ ô [0,0]).
 VFX_SPECS: dict[str, tuple] = {
     # Blood orb đang bay (4 frames, 1 hàng ngang)
     'blood_fly': (
         os.path.join(_BLOOD, 'VFX3', 'sprite-sheet.png'),
-        128, 128, 4, 4, 10, True,
+        128, 128, 4, 4, 10, True, 0,
     ),
     # Vụ nổ khi blood trúng (12 frames, 1 hàng ngang)
     'blood_impact': (
         os.path.join(_BLOOD, 'VFX2', 'sprite-sheet.png'),
-        128, 128, 12, 12, 18, False,
+        128, 128, 12, 12, 18, False, 0,
     ),
     # Lightning beam ngang → sẽ rotate (4 frames, 1 hàng ngang)
     'lightning_beam': (
         os.path.join(_LIGHT, 'VFX1', 'Sprite-sheet', 'Sprite-sheet.png'),
-        256, 128, 4, 4, 16, False,
+        256, 128, 4, 4, 16, False, 0,
     ),
     # Lightning sét đánh xuống (5 frames, 1 hàng ngang)
     'lightning_strike': (
         os.path.join(_LIGHT, 'VFX3', 'Sprite-sheet', 'Sprite-sheet.png'),
-        128, 256, 5, 5, 16, False,
+        128, 256, 5, 5, 16, False, 0,
     ),
     # Ice eruption từ đất (11 frames, 5 frame/hàng, 3 hàng)
     'ice_eruption': (
         os.path.join(_FROST, 'VFX3', 'sprite-sheet', 'sprite-sheet.png'),
-        256, 128, 11, 5, 16, False,
+        256, 128, 11, 5, 16, False, 0,
     ),
 
     # ── Fire Effect 1 ─────────────────────────────────────────────────────────
     # FireBolt bay (4 frame đầu sạch, loop mượt) — sheet 528×48, 11 frame
     'fire_bolt': (
         os.path.join(_FIRE1, 'Firebolt SpriteSheet.png'),
-        48, 48, 4, 11, 11, True,
+        48, 48, 4, 11, 11, True, 0,
     ),
-    # FireBolt impact khi trúng — sheet 240×48, 5 frame
+    # FireBolt impact khi trúng — lấy 6 khung BÊN PHẢI của cùng sheet
+    # Firebolt SpriteSheet.png (index 5-10, đã có sẵn hiệu ứng tia lửa nổ tung
+    # riêng, không cần file "Fire Breath hit effect" nữa).
     'fire_bolt_hit': (
-        os.path.join(_FIRE1, 'Fire Breath hit effect SpriteSheet.png'),
-        48, 48, 5, 5, 18, False,
+        os.path.join(_FIRE1, 'Firebolt SpriteSheet.png'),
+        48, 48, 6, 11, 18, False, 5,
     ),
     # Fire Breath cone (stream) — sheet 384×144, 4 cột × 3 hàng = 12 frame
     'fire_breath': (
         os.path.join(_FIRE1, 'Fire Breath SpriteSheet.png'),
-        96, 48, 12, 4, 22, True,
+        96, 48, 12, 4, 22, True, 0,
     ),
 
     # ── Fire Effect 2 ─────────────────────────────────────────────────────────
@@ -68,20 +72,7 @@ VFX_SPECS: dict[str, tuple] = {
     # fps chậm hơn → vụ nổ "nặng" hơn (khớp life_scale 1.6 ở game_loop)
     'fire_explosion': (
         os.path.join(_FIRE2, 'Explosion 2 SpriteSheet.png'),
-        48, 48, 18, 18, 15, False,
-    ),
-
-    # ── Wind Effect 02 ────────────────────────────────────────────────────────
-    # Air Burst (charged left-click) — sheet 144×144, 3×3 = 9 frame, rotate
-    'air_burst': (
-        os.path.join(_WIND, 'Air Burst.png'),
-        48, 48, 9, 3, 18, False,
-    ),
-    # Air Explosion (ultimate) — sheet 128×96, 4×3 = 12 frame
-    # fps chậm hơn → khớp life_scale 1.5 ở game_loop
-    'air_explosion': (
-        os.path.join(_WIND, 'Air Explosion.png'),
-        32, 32, 12, 4, 11, False,
+        48, 48, 18, 18, 15, False, 0,
     ),
 }
 
@@ -96,8 +87,6 @@ VFX_DISPLAY_SIZE: dict[str, tuple[int, int]] = {
     'fire_bolt_hit':   (56,  56),
     'fire_breath':     (130, 65),   # cone, rotate theo hướng
     'fire_explosion':  (200, 200),
-    'air_burst':       (110, 110),  # rotate theo hướng
-    'air_explosion':   (240, 240),  # scale lớn từ 32px source
 }
 
 
@@ -107,7 +96,8 @@ class SpriteAnimator:
     """Quản lý một animation từ sprite sheet đã slice."""
 
     def __init__(self, sheet: pygame.Surface, frame_w: int, frame_h: int,
-                 frame_count: int, cols: int, fps: float, loop: bool):
+                 frame_count: int, cols: int, fps: float, loop: bool,
+                 frame_offset: int = 0):
         self.frame_w     = frame_w
         self.frame_h     = frame_h
         self.fps         = fps
@@ -117,8 +107,9 @@ class SpriteAnimator:
         self.frames: list[pygame.Surface] = []
 
         for i in range(frame_count):
-            row  = i // cols
-            col  = i % cols
+            idx  = i + frame_offset
+            row  = idx // cols
+            col  = idx % cols
             rect = pygame.Rect(col * frame_w, row * frame_h, frame_w, frame_h)
             surf = pygame.Surface((frame_w, frame_h), pygame.SRCALPHA)
             surf.blit(sheet, (0, 0), rect)
@@ -174,12 +165,12 @@ class VFXLibrary:
     def load_all(self) -> None:
         if self._loaded:
             return
-        for key, (path, fw, fh, count, cols, fps, loop) in VFX_SPECS.items():
+        for key, (path, fw, fh, count, cols, fps, loop, offset) in VFX_SPECS.items():
             try:
                 # Tải raw rồi convert riêng để tránh exception chain bị treo
                 raw   = pygame.image.load(path)
                 sheet = raw.convert_alpha()
-                self._templates[key] = SpriteAnimator(sheet, fw, fh, count, cols, fps, loop)
+                self._templates[key] = SpriteAnimator(sheet, fw, fh, count, cols, fps, loop, offset)
             except Exception as e:
                 print(f'[VFX] Không tải được "{key}": {e}')
             finally:
@@ -222,8 +213,6 @@ class AnimatorPool:
         'fire_breath':     'fire_breath',
         'fire_breath_jet': 'fire_breath',
         'fire_explosion':  'fire_explosion',
-        'air_burst':       'air_burst',
-        'air_explosion':   'air_explosion',
     }
 
     def __init__(self):

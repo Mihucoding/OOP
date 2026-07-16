@@ -9,6 +9,22 @@ WINDOW_W, WINDOW_H = 1280, 720
 PIXEL_SCALE = WINDOW_W // SCREEN_W
 GRID_SIZE = 64
 
+# ── HƯỚNG DẪN ĐIỀU CHỈNH CAMERA ZOOM (Dành Cho Báo Cáo Bảo Vệ) ─────────────────
+# 1. Bạn chỉ cần sửa giá trị biến `ZOOM` ở dòng dưới để chỉnh camera (Ví dụ: 0.5, 0.8, 1.0).
+#    - ZOOM < 1.0 (ví dụ 0.75): Camera lùi xa (Zoom out), nhìn thấy map rộng hơn.
+#    - ZOOM = 1.0: Kích thước camera gốc 1:1.
+#    - ZOOM > 1.0 (ví dụ 1.25): Camera tiến lại gần (Zoom in).
+# 2. KHÔNG cần viết lại file Renderer này vì:
+#    - Lớp `GameLoop` sẽ tự động lấy giá trị ZOOM này để tạo tấm bảng ảo (game_surface)
+#      với kích thước phù hợp: (SCREEN_W / ZOOM) x (SCREEN_H / ZOOM).
+#    - Hệ thống toạ độ `world_to_screen` tự động nhân chia tỉ lệ theo ZOOM.
+# 3. Mẹo để tránh răng cưa (Pixel Distortion):
+#    - Nên chọn ZOOM sao cho kích thước bộ đệm chia ra là số nguyên chẵn.
+#      (Ví dụ: ZOOM = 0.5 -> 640/0.5 = 1280 (chẵn, đẹp), ZOOM = 0.8 -> 640/0.8 = 800 (chẵn, đẹp)).
+#    - Tránh các tỉ lệ lẻ như 0.73, 0.67 vì phép chia ra số thập phân lẻ sẽ làm các pixel
+#      bị méo hoặc nhấp nháy khi di chuyển.
+ZOOM = 0.75
+
 
 class Renderer:
     """
@@ -37,14 +53,19 @@ class Renderer:
         "lightning_beam",
         "lightning_ultimate",
         "lightning_overload",
+        "ice_spike",   # cần glow riêng cho vòng xoáy Ice (Twist of Fate) — xem _draw_ice_spiral_effect
     }
 
     def __init__(self, screen: pygame.Surface):
         self.screen       = screen
+        self._dmg_font      = self._load_pixel_font(9)
+        self._dmg_font_crit = self._load_pixel_font(12)
         self.sprite_cache: dict[str, pygame.Surface] = {}
         self._bullet_pool = AnimatorPool()
         self._effect_pool = AnimatorPool()
-        self.zoom = 1.0
+        # Chỉ dùng để TÍNH kích thước buffer ảo (xem module-level ZOOM ở trên)
+        # và world_to_screen's offset — KHÔNG scale sprite nào theo số này nữa.
+        self.zoom = ZOOM
         self.player_animations: dict[str, list[pygame.Surface]] = {}
         self.player_frame_size = 128
         self.player_draw_size = (48, 48)
@@ -66,21 +87,10 @@ class Renderer:
         self._load_enemy_animations()
         self.wind_projectile_frames: list[pygame.Surface] = []
         self._load_wind_sprites()
-        try:
-            from ui.tiled_map import DEFAULT_MAP_FILE, TiledMap
-            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            custom_map_path = os.path.join(root_dir, DEFAULT_MAP_FILE)
-            if os.path.exists(custom_map_path):
-                self.world_map = TiledMap(custom_map_path)
-            else:
-                from ui.tile_map import WorldMap
-                self.world_map = WorldMap()
-        except Exception:
-            try:
-                from ui.tile_map import WorldMap
-                self.world_map = WorldMap()
-            except Exception:
-                self.world_map = None
+        from ui.tiled_map import DEFAULT_MAP_FILE, TiledMap
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        custom_map_path = os.path.join(root_dir, DEFAULT_MAP_FILE)
+        self.world_map = TiledMap(custom_map_path)
         self.last_leave_tick = pygame.time.get_ticks()
         self.leaves = []
         self.scaled_cache = {}  # Cache cho scaled images (xp orb, leaves...)
@@ -107,59 +117,6 @@ class Renderer:
                 for x in range(0, sheet.get_width() - frame_w + 1, frame_w):
                     frame = sheet.subsurface((x, 0, frame_w, frame_h)).copy()
                     self.gold_orb_frames.append(frame)
-            except Exception:
-                pass
-
-        # Load Sheep animations
-        sheep_dir = os.path.join(
-            root_dir,
-            "assets",
-            "map",
-            "Tiny Swords (Free Pack)",
-            "Terrain",
-            "Resources",
-            "Meat",
-            "Sheep",
-        )
-        self.sheep_animations = {}
-        sheep_configs = {
-            "idle": ("Sheep_Idle.png", 6),
-            "wander": ("Sheep_Move.png", 4),
-            "eating": ("Sheep_Grass.png", 12),
-        }
-        for state_name, (filename, frame_count) in sheep_configs.items():
-            path = os.path.join(sheep_dir, filename)
-            if os.path.exists(path):
-                try:
-                    sheet = pygame.image.load(path).convert_alpha()
-                    frames = []
-                    frame_w = 128
-                    frame_h = 128
-                    for i in range(frame_count):
-                        frame = sheet.subsurface((i * frame_w, 0, frame_w, frame_h)).copy()
-                        # Lưu trữ frame gốc 128x128, KHÔNG scale trước
-                        frames.append(frame)
-                    self.sheep_animations[state_name] = frames
-                except Exception:
-                    pass
-
-        # Load Meat sprite
-        meat_path = os.path.join(
-            root_dir,
-            "assets",
-            "map",
-            "Tiny Swords (Free Pack)",
-            "Terrain",
-            "Resources",
-            "Meat",
-            "Meat Resource",
-            "Meat Resource.png",
-        )
-        self.meat_sprite = None
-        if os.path.exists(meat_path):
-            try:
-                # Lưu trữ sprite gốc 64x64, KHÔNG scale trước
-                self.meat_sprite = pygame.image.load(meat_path).convert_alpha()
             except Exception:
                 pass
 
@@ -310,6 +267,14 @@ class Renderer:
 
     # ── Tiện ích ──────────────────────────────────────────────────────────────
 
+    def _load_pixel_font(self, size: int) -> pygame.font.Font:
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        font_path = os.path.join(root_dir, "assets", "fonts", "pixel_font.ttf")
+        try:
+            return pygame.font.Font(font_path, size)
+        except Exception:
+            return pygame.font.SysFont(None, size)
+
     def load_sprite(self, name: str, path: str, size: tuple) -> None:
         try:
             img = pygame.image.load(path).convert_alpha()
@@ -356,6 +321,12 @@ class Renderer:
         self.player_animations["dash_back"] = row9[3:6] or self._slice_player_row(sheet, 2, 0, 4, frame_size)
         self.player_animations["die"] = self._slice_player_row(sheet, 6, 0, 10, frame_size)
         self.player_animations["hurt"] = self._slice_player_row(sheet, 7, 0, 4, frame_size)
+        # Vung tay bắn lửa (hàng 4, 1-indexed = row index 3) — 7 khung có nội
+        # dung, khung 7-9 trống nên tự bị lọc bỏ bởi bounding_rect check dưới.
+        self.player_animations["cast_fire"] = self._slice_player_row(sheet, 3, 0, 10, frame_size)
+        # Cast điện (hàng 10, 1-indexed = row index 9) — đầu hé mở, năng lượng
+        # sáng dần rồi phóng tia beam dài ở khung cuối, đủ 10 khung.
+        self.player_animations["cast_lightning"] = self._slice_player_row(sheet, 9, 0, 10, frame_size)
         self.player_animations = {
             name: frames for name, frames in self.player_animations.items()
             if frames
@@ -466,38 +437,41 @@ class Renderer:
         return tuple(int(part) for part in parts) or (0,)
 
     def _zoom_surface(self, image: pygame.Surface, smooth: bool = False) -> pygame.Surface:
-        if self.zoom == 1.0:
-            return image
-        w = max(1, int(image.get_width() * self.zoom))
-        h = max(1, int(image.get_height() * self.zoom))
-        scaler = pygame.transform.smoothscale if smooth else pygame.transform.scale
-        return scaler(image, (w, h))
+        # KHÔNG scale sprite theo zoom nữa — game_surface đã to hơn theo đúng
+        # tỉ lệ zoom (xem GameLoop), mọi thứ vẽ ở kích thước gốc (native pixel)
+        # lên đó, cả khung hình chỉ scale MỘT LẦN duy nhất ở bước cuối cùng
+        # (_present_game_surface) thay vì scale từng sprite riêng lẻ mỗi frame
+        # — tránh hẳn viền nham nhở (nearest ở tỉ lệ lẻ) lẫn mờ (smoothscale).
+        return image
 
     def _zoom_len(self, value: float) -> int:
-        return max(1, int(value * self.zoom))
+        return max(1, int(value))
 
     def world_to_screen(self, wx, wy, cam_x, cam_y) -> tuple:
-        sx = (wx - cam_x) * self.zoom + SCREEN_W / 2
-        sy = (wy - cam_y) * self.zoom + SCREEN_H / 2
+        sx = (wx - cam_x) + self.screen.get_width() / 2
+        sy = (wy - cam_y) + self.screen.get_height() / 2
         return (int(sx), int(sy))
 
     # ── Nền ───────────────────────────────────────────────────────────────────
 
     def draw_background(self, cam_x: float, cam_y: float) -> None:
+        buf_w, buf_h = self.screen.get_size()
         if self.world_map:
             self.screen.fill((0, 0, 0))
-            self.world_map.draw(self.screen, cam_x, cam_y, SCREEN_W, SCREEN_H, self.zoom)
+            # zoom=1.0: tile vẽ ở kích thước gốc lên buffer đã to sẵn theo
+            # đúng tỉ lệ zoom thật (buf_w/h) — xem ghi chú ở world_to_screen.
+            self.world_map.draw(self.screen, cam_x, cam_y, buf_w, buf_h, 1.0)
             return
 
         self.screen.fill(self.COLOR_BG)
         # Grid động: dịch chuyển theo camera để thấy player đang di chuyển
-        grid_size = max(1, int(GRID_SIZE * self.zoom))
-        offset_x = int((-cam_x * self.zoom) % grid_size)
-        offset_y = int((-cam_y * self.zoom) % grid_size)
-        for gx in range(offset_x, SCREEN_W + grid_size, grid_size):
-            pygame.draw.line(self.screen, self.COLOR_GRID, (gx, 0), (gx, SCREEN_H))
-        for gy in range(offset_y, SCREEN_H + grid_size, grid_size):
-            pygame.draw.line(self.screen, self.COLOR_GRID, (0, gy), (SCREEN_W, gy))
+        grid_size = max(1, GRID_SIZE)
+        offset_x = int((-cam_x) % grid_size)
+        offset_y = int((-cam_y) % grid_size)
+        for gx in range(offset_x, buf_w + grid_size, grid_size):
+            pygame.draw.line(self.screen, self.COLOR_GRID, (gx, 0), (gx, buf_h))
+        for gy in range(offset_y, buf_h + grid_size, grid_size):
+            pygame.draw.line(self.screen, self.COLOR_GRID, (0, gy), (buf_w, gy))
 
     def draw_map_decorations(
         self,
@@ -507,13 +481,14 @@ class Renderer:
         max_sort_y: float | None = None,
     ) -> None:
         if self.world_map and hasattr(self.world_map, "draw_decorations"):
+            buf_w, buf_h = self.screen.get_size()
             self.world_map.draw_decorations(
                 self.screen,
                 cam_x,
                 cam_y,
-                SCREEN_W,
-                SCREEN_H,
-                self.zoom,
+                buf_w,
+                buf_h,
+                1.0,
                 min_sort_y=min_sort_y,
                 max_sort_y=max_sort_y,
             )
@@ -538,11 +513,21 @@ class Renderer:
             pygame.draw.circle(self.screen, self.COLOR_PLAYER, (sx, sy), radius)
             pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 2)
 
+    # Phải khớp FIRE_CAST_FRAME_MS ở ui/game_loop.py (game_loop tính lúc bắn
+    # đạn dựa theo cùng con số này — đổi thì đổi cả 2 chỗ).
+    CAST_FIRE_FRAME_MS = 40
+    CAST_LIGHTNING_FRAME_MS = 35   # 10 khung ~ 350ms — chớp năng lượng rồi bung tia nhanh hơn
+
     def _get_player_anim_name(self, player) -> str:
         if not getattr(player, "alive", True):
             return "die"
         if getattr(player, "hurt_timer", 0.0) > 0:
             return "hurt"
+        cast_anim = getattr(player, "cast_anim", None)
+        if cast_anim == "fire" and getattr(player, "cast_lock_timer", 0.0) > 0:
+            return "cast_fire"
+        if cast_anim == "lightning" and getattr(player, "cast_lock_timer", 0.0) > 0:
+            return "cast_lightning"
         if getattr(player, "dash_timer", 0.0) > 0:
             return "dash_forward" if getattr(player, "last_dash_forward", True) else "dash_back"
         return "run" if getattr(player, "is_moving", False) else "idle"
@@ -555,7 +540,7 @@ class Renderer:
 
         elapsed = max(0, now - self.player_anim_started_ms)
         frame_ms = self._get_player_frame_ms(anim_name, player)
-        if anim_name == "die":
+        if anim_name in ("die", "cast_fire", "cast_lightning"):
             return min(elapsed // frame_ms, frame_count - 1)
         return (elapsed // frame_ms) % frame_count
 
@@ -569,18 +554,29 @@ class Renderer:
             return 80
         if anim_name == "die":
             return 110
+        if anim_name == "cast_fire":
+            return self.CAST_FIRE_FRAME_MS
+        if anim_name == "cast_lightning":
+            return self.CAST_LIGHTNING_FRAME_MS
         return 120
 
     def _get_player_bob(self, anim_name: str) -> int:
         if anim_name != "run":
             return 0
         elapsed = max(0, pygame.time.get_ticks() - self.player_anim_started_ms)
-        return int(math.sin(elapsed / 85.0) * self.zoom)
+        return int(math.sin(elapsed / 85.0))
 
-    def draw_enemy(self, enemy, cam_x, cam_y) -> None:
-        from logic.entities.sheep import Sheep
-        if isinstance(enemy, Sheep):
-            self.draw_sheep(enemy, cam_x, cam_y)
+    def draw_enemy(self, enemy, cam_x, cam_y, dt: float = 0.0) -> None:
+        """
+        Vẽ quái vật lên màn hình.
+        Tính toán tọa độ thực trên màn hình dựa vào camera (cam_x, cam_y).
+        Vẽ thanh máu của quái và hình ảnh con quái. Các hiệu ứng nhấp nháy khi trúng đòn cũng được xử lý ở đây.
+
+        👉 BƯỚC TIẾP THEO (Bước 20 - Kết thúc): Cứ như vậy, vòng lặp game diễn ra liên tục cho đến khi Boss xuất hiện và bị tiêu diệt. Cuối cùng, game chuyển sang màn hình chiến thắng! Hãy mở file cuối cùng: [ui/screens/win_screen.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/ui/screens/win_screen.py) và đọc hàm `draw`.
+        """
+        from logic.entities.dummy_enemy import DummyEnemy
+        if isinstance(enemy, DummyEnemy):
+            self._draw_dummy(enemy, cam_x, cam_y)
             return
 
         sx, sy = self.world_to_screen(enemy.x, enemy.y, cam_x, cam_y)
@@ -632,7 +628,14 @@ class Renderer:
             if anim_name == 'die':
                 timer = getattr(enemy, 'die_timer', 0.0)
                 idx = min(frame_count - 1, int((timer / 1.2) * frame_count))
-            elif anim_name in ('hit', 'idle', 'run'):
+            elif anim_name == 'hit':
+                # Khớp đúng nhịp trúng đòn: hurt_timer đếm ngược từ HURT_DURATION
+                # về 0 ngay lúc take_damage() — chạy flipbook 1 lần ĐÚNG theo đó,
+                # thay vì lấy tick đồng hồ hệ thống (không ăn khớp thời điểm trúng).
+                HURT_DURATION = 0.3
+                elapsed = HURT_DURATION - getattr(enemy, 'hurt_timer', 0.0)
+                idx = min(frame_count - 1, int((elapsed / HURT_DURATION) * frame_count))
+            elif anim_name in ('idle', 'run'):
                 idx = (pygame.time.get_ticks() // 80) % frame_count
             elif state == 'attack' or state == 'attack1':
                 timer = getattr(enemy, 'attack_timer', 0.0)
@@ -652,15 +655,21 @@ class Renderer:
             img = self._zoom_surface(frames[idx])
             if getattr(enemy, 'facing_dir', 1) > 0:
                 img = pygame.transform.flip(img, True, False)
-                
-            self.screen.blit(img, img.get_rect(midbottom=(sx, sy + self._zoom_len(20))))
+            shake_x, _ = self._hit_shake_offset(enemy)
+
+            self.screen.blit(img, img.get_rect(midbottom=(sx + shake_x, sy + self._zoom_len(20))))
         else:
             # Fallback hình tròn
             color = getattr(enemy, 'COLOR', self.COLOR_ENEMY)
             if is_ranged: color = self.COLOR_RANGED
+            hurt = getattr(enemy, 'hurt_timer', 0.0)
+            if hurt > 0:
+                t = hurt / 0.3
+                color = tuple(min(255, int(c + (255 - c) * t)) for c in color)
             radius = self._zoom_len(enemy.radius)
-            pygame.draw.circle(self.screen, color, (sx, sy), radius)
-            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 2)
+            shake_x, _ = self._hit_shake_offset(enemy)
+            pygame.draw.circle(self.screen, color, (sx + shake_x, sy), radius)
+            pygame.draw.circle(self.screen, (255, 255, 255), (sx + shake_x, sy), radius, 2)
 
         # HP bar
         hp_offset = self._zoom_len(48)
@@ -671,36 +680,47 @@ class Renderer:
         elif is_tank:
             hp_offset = self._zoom_len(62)
             bar_w = self._zoom_len(54)
-        self._draw_hp_bar(enemy, sx, sy, hp_offset, bar_w=bar_w)
+        self._draw_hp_bar(enemy, sx, sy, hp_offset, bar_w=bar_w, dt=dt)
 
-    def draw_sheep(self, sheep, cam_x, cam_y) -> None:
-        sx, sy = self.world_to_screen(sheep.x, sheep.y, cam_x, cam_y)
+    def _draw_dummy(self, dummy, cam_x, cam_y) -> None:
+        """Bia tập: target tròn đồng tâm + đọc DPS/tổng damage phía trên."""
+        sx, sy = self.world_to_screen(dummy.x, dummy.y, cam_x, cam_y)
+        self._draw_status_halo(dummy, sx, sy)
+        r = self._zoom_len(dummy.radius)
 
-        state_name = sheep.state  # "idle", "wander", "eating", "die"
-        anim_state = state_name if state_name in self.sheep_animations else "idle"
-        frames = self.sheep_animations.get(anim_state)
-        if frames:
-            now = pygame.time.get_ticks()
-            frame_ms = 120 if state_name == "eating" else 100
-            frame_idx = (now // frame_ms + id(sheep) % len(frames)) % len(frames)
-            img = self._zoom_surface(frames[frame_idx], smooth=True)  # smooth=True để giữ viền
+        hit = getattr(dummy, 'hurt_timer', 0.0) > 0
+        base = (245, 245, 255) if hit else (210, 210, 220)
+        # Vòng target đồng tâm
+        pygame.draw.circle(self.screen, base, (sx, sy), r)
+        pygame.draw.circle(self.screen, (200, 70, 70), (sx, sy), r, max(1, r // 5))
+        pygame.draw.circle(self.screen, base, (sx, sy), max(1, r * 2 // 3), max(1, r // 6))
+        pygame.draw.circle(self.screen, (200, 70, 70), (sx, sy), max(1, r // 3))
+        pygame.draw.circle(self.screen, (40, 44, 54), (sx, sy), r, 2)
 
-            if sheep.facing_dir < 0:
-                img = pygame.transform.flip(img, True, False)
+        # Chân đế nhỏ cho ra dáng bia đứng
+        pygame.draw.rect(self.screen, (90, 70, 55),
+                         (sx - 3, sy, 6, r + 6))
 
-            rect = img.get_rect(center=(sx, sy))
-            self.screen.blit(img, rect)
+        # Đọc DPS + tổng damage — có nền panel mờ để chữ luôn rõ dù đứng
+        # trên nền cỏ/địa hình sáng màu (chữ nổi trần trước đây rất khó đọc)
+        dps = getattr(dummy, 'dps', 0.0)
+        total = getattr(dummy, 'total_damage', 0.0)
+        dps_surf = self._dmg_font_crit.render(f"DPS {dps:,.0f}", True, (255, 225, 100))
+        tot_surf = self._dmg_font.render(f"Tổng {total:,.0f}", True, (235, 240, 250))
 
-            # Cừu chỉ hiển thị HP bar khi bị thương
-            if sheep.hp < sheep.max_hp:
-                self._draw_hp_bar(
-                    sheep, sx, sy, self._zoom_len(38), bar_w=self._zoom_len(34))
-        else:
-            radius = self._zoom_len(sheep.radius)
-            pygame.draw.circle(self.screen, (240, 240, 240), (sx, sy), radius)
-            pygame.draw.circle(self.screen, (200, 200, 200), (sx, sy), radius, 2)
+        pad_x, pad_y, gap = 10, 5, 2
+        panel_w = max(dps_surf.get_width(), tot_surf.get_width()) + pad_x * 2
+        panel_h = dps_surf.get_height() + tot_surf.get_height() + pad_y * 2 + gap
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (12, 13, 18, 175), panel.get_rect(), border_radius=6)
+        pygame.draw.rect(panel, (255, 255, 255, 45), panel.get_rect(), 1, border_radius=6)
+        panel_rect = panel.get_rect(center=(sx, sy - r - 24))
+        self.screen.blit(panel, panel_rect)
+        self.screen.blit(dps_surf, dps_surf.get_rect(midtop=(sx, panel_rect.y + pad_y)))
+        self.screen.blit(tot_surf, tot_surf.get_rect(
+            midtop=(sx, panel_rect.y + pad_y + dps_surf.get_height() + gap)))
 
-    def draw_boss(self, boss, cam_x, cam_y) -> None:
+    def draw_boss(self, boss, cam_x, cam_y, dt: float = 0.0) -> None:
         sx, sy = self.world_to_screen(boss.x, boss.y, cam_x, cam_y)
         radius = self._zoom_len(boss.radius)
 
@@ -734,7 +754,11 @@ class Renderer:
             if anim_name == 'die':
                 timer = getattr(boss, 'die_timer', 0.0)
                 idx = min(frame_count - 1, int((timer / 1.2) * frame_count))
-            elif anim_name in ('hit', 'idle', 'run'):
+            elif anim_name == 'hit':
+                HURT_DURATION = 0.3
+                elapsed = HURT_DURATION - getattr(boss, 'hurt_timer', 0.0)
+                idx = min(frame_count - 1, int((elapsed / HURT_DURATION) * frame_count))
+            elif anim_name in ('idle', 'run'):
                 idx = (pygame.time.get_ticks() // 80) % frame_count
             elif getattr(boss, 'aoe_active', False):
                 timer = getattr(boss, 'aoe_timer', 0.0)
@@ -747,17 +771,22 @@ class Renderer:
             # Hình Golem mặc định hướng trái, lật nếu facing_dir > 0
             if getattr(boss, 'facing_dir', 1) > 0:
                 img = pygame.transform.flip(img, True, False)
-            self.screen.blit(img, img.get_rect(midbottom=(sx, sy + self._zoom_len(35))))
+            shake_x, _ = self._hit_shake_offset(boss)
+            self.screen.blit(img, img.get_rect(midbottom=(sx + shake_x, sy + self._zoom_len(35))))
         else:
             body_color = (255, 120, 0) if getattr(boss, 'is_charging', False) else self.COLOR_BOSS
-            pygame.draw.circle(self.screen, body_color, (sx, sy), radius)
-            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 3)
+            hurt = getattr(boss, 'hurt_timer', 0.0)
+            if hurt > 0:
+                t = hurt / 0.3
+                body_color = tuple(min(255, int(c + (255 - c) * t)) for c in body_color)
+            shake_x, _ = self._hit_shake_offset(boss)
+            pygame.draw.circle(self.screen, body_color, (sx + shake_x, sy), radius)
+            pygame.draw.circle(self.screen, (255, 255, 255), (sx + shake_x, sy), radius, 3)
 
-        # HP bar (to hơn)
+        # HP bar (to hơn) — dùng gradient theo % máu như quái thường.
         self._draw_hp_bar(
             boss, sx, sy, self._zoom_len(96),
-            bar_w=self._zoom_len(92), bar_h=self._zoom_len(4),
-            color=(200, 0, 220))
+            bar_w=self._zoom_len(92), bar_h=self._zoom_len(4), dt=dt)
 
     def draw_bullet(self, bullet, cam_x, cam_y, dt: float = 0.0) -> None:
         sx, sy      = self.world_to_screen(bullet.x, bullet.y, cam_x, cam_y)
@@ -845,7 +874,10 @@ class Renderer:
         core_color  = (255, 255, 225) if is_crit else (240, 250, 255)
         glow_color  = (255, 210, 90)  if is_crit else (150, 205, 255)
         half_w = max(1.5, self._zoom_len(2.6))   # bề rộng NỬA lưỡi — mảnh
-        curve  = self._zoom_len(5.0)             # độ cong nhẹ của lưỡi
+        # Twist of Fate gắn dưới Flash of Swords (bullet._twist_stack > 0):
+        # lưỡi kiếm bẻ cong rõ hơn hẳn, thay vì độ cong nhẹ mặc định.
+        twist_stack = getattr(bullet, '_twist_stack', 0)
+        curve = self._zoom_len(5.0 + 11.0 * twist_stack)  # độ cong của lưỡi
         N = 12
 
         # Dựng 2 mép lưỡi: rộng nhất ~giữa, thon nhọn dần về 2 đầu (mũi = điểm).
@@ -883,24 +915,65 @@ class Renderer:
         sx, sy = self.world_to_screen(eb.x, eb.y, cam_x, cam_y)
         pygame.draw.circle(self.screen, self.COLOR_ENEMY_BULLET, (sx, sy), self._zoom_len(eb.radius))
 
-    def draw_xp_orb(self, orb, cam_x, cam_y) -> None:
-        from logic.entities.meat import Meat
-        if isinstance(orb, Meat):
-            self.draw_meat(orb, cam_x, cam_y)
-            return
+    @staticmethod
+    def _xp_orb_tier_colors(value: float) -> tuple:
+        """Màu quầng sáng theo bậc giá trị — khớp tier của hình đa giác fallback
+        (>=80 vàng / >=25 tím / còn lại xanh lá) để orb quý hiện rõ hơn."""
+        if value >= 80:
+            return (255, 215, 110), (255, 160, 60)
+        if value >= 25:
+            return (195, 165, 255), (125, 95, 255)
+        return (150, 255, 195), (70, 220, 175)
 
+    def _get_xp_orb_glow(self, bright: tuple, dim: tuple, glow_r: int) -> pygame.Surface:
+        """Texture quầng sáng radial-gradient mềm (tâm sáng màu bright, rìa mờ
+        dần sang dim rồi trong suốt hẳn) — dựng 1 lần rồi cache theo (màu,
+        bán kính), độ sáng nhấp nháy sau đó chỉ cần set_alpha() lúc blit, không
+        phải vẽ lại mỗi khung hình."""
+        cache_key = ('xp_glow', bright, dim, glow_r)
+        cached = self.scaled_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+        cx = cy = glow_r
+        for r in range(glow_r, 0, -1):
+            t = r / glow_r        # 1.0 ở rìa ngoài -> ~0 ở tâm
+            k = 1.0 - t            # 0 ở rìa -> 1 ở tâm
+            col = tuple(int(dim[c] + (bright[c] - dim[c]) * k) for c in range(3))
+            alpha = int(190 * (k ** 1.7))
+            pygame.draw.circle(surf, (*col, max(2, alpha)), (cx, cy), r)
+        self.scaled_cache[cache_key] = surf
+        return surf
+
+    def draw_xp_orb(self, orb, cam_x, cam_y) -> None:
         now = pygame.time.get_ticks()
-        bob = math.sin(now * 0.006 + id(orb) % 37) * self._zoom_len(2.0)
+        bob = math.sin(now * 0.006 + id(orb) % 37) * self._zoom_len(2.5)
         sx, sy = self.world_to_screen(orb.x, orb.y, cam_x, cam_y)
         sy += int(bob)
+        value = getattr(orb, "value", 1)
+
+        # Bóng đổ dưới chân — tách orb khỏi nền cỏ/bụi cây, cho cảm giác "nổi"
+        shadow_r = self._zoom_len(6)
+        if shadow_r > 0:
+            shadow = pygame.Surface((shadow_r * 2, shadow_r), pygame.SRCALPHA)
+            pygame.draw.ellipse(shadow, (8, 14, 8, 100), shadow.get_rect())
+            self.screen.blit(shadow, shadow.get_rect(center=(sx, sy + self._zoom_len(10))))
+
+        # Quầng sáng nhấp nháy theo bậc giá trị — điểm khác biệt lớn nhất giúp
+        # orb nổi bật giữa nền tile bận rộn thay vì chìm vào màu cỏ.
+        bright, dim = self._xp_orb_tier_colors(value)
+        pulse = 0.7 + 0.3 * math.sin(now * 0.006 + id(orb) % 23)
+        glow_r = max(6, self._zoom_len(17 + min(9, value / 22.0)))
+        glow_tex = self._get_xp_orb_glow(bright, dim, glow_r)
+        glow_tex.set_alpha(int(255 * pulse))
+        self.screen.blit(glow_tex, glow_tex.get_rect(center=(sx, sy)))
 
         # Vẽ Gold Resource Highlight động
         if self.gold_orb_frames:
             # frame_idx lặp từ 0 đến 5 dựa trên ticks
             frame_idx = (now // 110 + id(orb) % 6) % len(self.gold_orb_frames)
             frame = self.gold_orb_frames[frame_idx]
-            
-            value = getattr(orb, "value", 1)
+
             # Thu nhỏ lại cho bằng kích thước exp (~28x28 base, scale theo zoom camera và giá trị)
             base_size = 28.0 * (1.0 + min(0.18, value / 240.0))
             draw_size = max(6, self._zoom_len(base_size))
@@ -917,7 +990,6 @@ class Renderer:
             self.screen.blit(scaled_img, rect)
         else:
             # Fallback đa giác nếu thiếu ảnh
-            value = getattr(orb, "value", 1)
             if value >= 80:
                 core = (255, 235, 120)
                 edge = (255, 170, 75)
@@ -952,28 +1024,6 @@ class Renderer:
                     1,
                 )
 
-    def draw_meat(self, meat, cam_x, cam_y) -> None:
-        now = pygame.time.get_ticks()
-        bob = math.sin(now * 0.006 + id(meat) % 37) * self._zoom_len(2.0)
-        sx, sy = self.world_to_screen(meat.x, meat.y, cam_x, cam_y)
-        sy += int(bob)
-
-        if self.meat_sprite:
-            draw_size = self._zoom_len(26)
-            cache_key = (id(self.meat_sprite), draw_size)
-            scaled_img = self.scaled_cache.get(cache_key)
-            if scaled_img is None:
-                # Dùng smoothscale để giữ nguyên viền khi scale nhỏ
-                scaled_img = pygame.transform.smoothscale(self.meat_sprite, (draw_size, draw_size))
-                self.scaled_cache[cache_key] = scaled_img
-
-            rect = scaled_img.get_rect(center=(sx, sy))
-            self.screen.blit(scaled_img, rect)
-        else:
-            radius = self._zoom_len(meat.radius)
-            pygame.draw.circle(self.screen, (180, 80, 50), (sx, sy), radius)
-            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), radius, 1)
-
     def draw_ice_charge_preview(self, ice_charge: dict, cam_x, cam_y) -> None:
         attacks = ice_charge.get("attacks") if ice_charge else None
         if not attacks:
@@ -983,7 +1033,7 @@ class Renderer:
             self._draw_ice_hitbox_preview(attack, ratio, cam_x, cam_y)
 
     def _draw_ice_hitbox_preview(self, attack: dict, ratio: float, cam_x, cam_y) -> None:
-        overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         fill = (95, 205, 255, int(45 + 70 * ratio))
         outline = (190, 245, 255, int(140 + 90 * ratio))
 
@@ -1091,14 +1141,12 @@ class Renderer:
             self._draw_center_sprite_effect(effect, cam_x, cam_y, dt, 'fire_bolt_hit')
         elif vt == 'fire_explosion':
             self._draw_center_sprite_effect(effect, cam_x, cam_y, dt, 'fire_explosion', aoe=True)
-        elif vt == 'air_explosion':
-            self._draw_center_sprite_effect(effect, cam_x, cam_y, dt, 'air_explosion', aoe=True)
-        elif vt == 'air_burst':
-            self._draw_directional_sprite_effect(effect, cam_x, cam_y, dt, 'air_burst')
         elif vt == 'fire_breath_jet':
             self._draw_fire_jet(effect, cam_x, cam_y, dt)
         elif vt == 'wind_vortex':
             self._draw_vortex_zone(effect, cam_x, cam_y)
+        elif vt == 'fire_trail':
+            self._draw_fire_trail(effect, cam_x, cam_y, dt)
 
     def _draw_center_sprite_effect(self, effect, cam_x, cam_y, dt: float,
                                    key: str, aoe: bool = False) -> None:
@@ -1131,28 +1179,57 @@ class Renderer:
             scaled.set_alpha(max(0, int(255 * (1.0 - (t - 0.55) / 0.45))))
         self.screen.blit(scaled, scaled.get_rect(center=(sx, sy)))
 
-    def _draw_directional_sprite_effect(self, effect, cam_x, cam_y, dt: float,
-                                        key: str) -> None:
-        sx, sy = self.world_to_screen(effect.x, effect.y, cam_x, cam_y)
-        total = getattr(effect, 'lifetime', getattr(effect, 'LIFETIME', 0.4))
-        t = min(1.0, effect.elapsed / total) if total > 0 else 1.0
-        anim = self._effect_pool.update_and_get(effect, dt)
-        if not anim:
-            color = (150, 230, 150)
-            radius = self._zoom_len(getattr(effect, 'hit_radius', 28))
-            pygame.draw.circle(self.screen, color, (sx, sy), radius, 2)
+    def _draw_fire_trail(self, effect, cam_x, cam_y, dt: float) -> None:
+        """Vệt lửa liên tục (Destructive Path) — KHÔNG vẽ nền/thanh glow cố
+        định nữa (từng trông như 1 viên thuốc màu tĩnh, không thấy rõ đang
+        bám sát đường đạn thật). Chỉ còn lưỡi lửa nhỏ bập bùng (phong cách
+        _draw_burn_effect) đặt ĐÚNG tại từng điểm đã ghi nhận — đạn/gai/tia đi
+        tới đâu, điểm sinh ra tới đó, lửa hiện lên đúng ngay chỗ đó, không
+        khoảng đệm/hình dạng cố định nào che mất quỹ đạo thật. Alpha giảm dần
+        theo tuổi từng điểm — đuôi vệt mờ trước, đầu vệt vẫn sáng rõ."""
+        pts = effect.points
+        if not pts:
             return
 
-        frame = anim.current_frame()
-        base_w, base_h = VFX_DISPLAY_SIZE.get(key, (110, 110))
-        scale = 1.0 + getattr(effect, 'charge_ratio', 0.0) * 0.8
-        dw = self._zoom_len(base_w * scale)
-        dh = self._zoom_len(base_h * scale)
-        scaled = pygame.transform.scale(frame, (dw, dh))
-        if t > 0.6:
-            scaled.set_alpha(max(0, int(255 * (1.0 - (t - 0.6) / 0.4))))
-        rotated = pygame.transform.rotate(scaled, -math.degrees(effect.angle_rad))
-        self.screen.blit(rotated, rotated.get_rect(center=(sx, sy)))
+        def age_alpha(age: float) -> float:
+            if effect.trail_duration <= 0:
+                return 1.0
+            return max(0.0, 1.0 - age / effect.trail_duration)
+
+        base_r = max(2, self._zoom_len(effect.radius))
+        now = pygame.time.get_ticks() * 0.001
+        for i, (x, y, age) in enumerate(pts):
+            a = age_alpha(age)
+            if a <= 0.08:
+                continue
+            sx, sy = self.world_to_screen(x, y, cam_x, cam_y)
+            seed = ((i * 37 + id(effect)) % 997) * 0.013
+            phase = now * 7.0 + i * 1.7 + seed
+            self._draw_trail_flame_tongue(sx, sy, base_r, a, phase)
+
+    def _draw_trail_flame_tongue(self, sx, sy, base_r: float, alpha: float, phase: float) -> None:
+        """1 lưỡi lửa nhỏ bập bùng — cùng phong cách với _draw_burn_effect
+        (tam giác lệch đỉnh, lắc ngang + nhấp nháy theo sin(phase)), nhưng vẽ
+        lên surface riêng để có alpha (vệt lửa cần mờ dần theo tuổi, khác
+        hiệu ứng Burn trên quái vốn chỉ có/không có, luôn vẽ đục)."""
+        flick = 0.55 + 0.45 * abs(math.sin(phase))
+        h = max(2.0, base_r * 0.8 * flick)
+        w = max(1.0, base_r * 0.36 * flick)
+        sway = math.sin(phase * 2.2) * w * 0.7
+        t = 0.5 + 0.5 * math.sin(phase * 1.9)
+        color = (255, int(110 + 70 * t), int(20 * t))
+        a = int(max(0.0, min(1.0, alpha)) * 235)
+        size = int(max(h, w) * 2 + 6)
+        cx = cy = size // 2
+        points = [
+            (cx + sway, cy - h),
+            (cx - w, cy),
+            (cx, cy + h * 0.15),
+            (cx + w, cy),
+        ]
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.polygon(surf, (*color, a), points)
+        self.screen.blit(surf, (sx - cx, sy - cy))
 
     def _draw_fire_jet(self, jet, cam_x, cam_y, dt: float) -> None:
         sx, sy = self.world_to_screen(jet.x, jet.y, cam_x, cam_y)
@@ -1172,59 +1249,66 @@ class Renderer:
         self.screen.blit(rotated, rotated.get_rect(center=(int(cx), int(cy))))
 
     def _draw_vortex_zone(self, effect, cam_x, cam_y) -> None:
-        """Cơn lốc Perfect Storm — vòng tròn mờ đánh dấu vùng hút + các vệt
-        gió xoáy quay quanh tâm. Tâm dùng effect.x/effect.y HIỆN TẠI (không
-        phải điểm cast gốc) vì VortexZone tự lượn qua lại mỗi frame."""
+        """Cơn lốc Perfect Storm — cụm nhiều cây lốc nhỏ (dạng phễu xoáy thu
+        nhỏ dần lên) rải quanh tâm, thay vì 1 vòng tròn đối xứng đều. Tâm dùng
+        effect.x/effect.y HIỆN TẠI (không phải điểm cast gốc) vì VortexZone tự
+        trôi + lượn zigzag mỗi frame theo hướng đường đạn đã bắn ra."""
         sx, sy = self.world_to_screen(effect.x, effect.y, cam_x, cam_y)
         radius = self._zoom_len(effect.AoE_RADIUS)
         if radius < 1:
             return
-        color = (120, 230, 150)
 
         grow = min(1.0, effect.elapsed / max(0.001, effect.GROW_DUR))
         t = effect.anim_progress
         fade_from = 0.7
         fade = 1.0 if t < fade_from else max(0.0, 1.0 - (t - fade_from) / (1.0 - fade_from))
-        r = max(1, int(radius * grow))
 
+        # Vòng mờ đánh dấu bán kính hút — giữ lại để người chơi thấy tầm ảnh hưởng.
+        r = max(1, int(radius * grow))
         ring = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
-        pygame.draw.circle(ring, (*color, int(140 * fade)), (r + 4, r + 4), r, 3)
+        pygame.draw.circle(ring, (120, 230, 150, int(70 * fade)), (r + 4, r + 4), r, 2)
         self.screen.blit(ring, (sx - r - 4, sy - r - 4))
 
-        # 3 vệt xoáy, mỗi vệt 4 chấm cuộn dần vào tâm — bán quay riêng biệt
-        # với chuyển động lượn qua lại của cả vùng (spin nhanh hơn hẳn).
-        spin = effect.elapsed * 3.0
-        for i in range(3):
-            base_ang = spin + i * (math.tau / 3)
-            for k in range(4):
-                frac = (k + 1) / 5.0
-                wr = r * frac * grow
-                ang = base_ang + frac * 2.4
-                wx = sx + math.cos(ang) * wr
-                wy = sy + math.sin(ang) * wr
-                dot_r = max(1, self._zoom_len(3 * (1.0 - frac * 0.5)))
-                pygame.draw.circle(self.screen, color, (int(wx), int(wy)), dot_r)
+        now = pygame.time.get_ticks() * 0.001
+        for ox, oy, scale, phase in effect._tornado_layout:
+            cx = sx + ox * radius
+            cy = sy + oy * radius
+            self._draw_mini_tornado(cx, cy, radius * scale * grow, fade, now + phase)
 
-    def draw_wind_charge(self, player, ratio: float, cam_x, cam_y) -> None:
-        ratio = max(0.0, min(1.0, ratio))
-        sx, sy = self.world_to_screen(player.x, player.y, cam_x, cam_y)
-        radius = self._zoom_len(18 + ratio * 78)
-        base = pygame.time.get_ticks() * 0.005
-        count = 4 + int(ratio * 10)
-        color = (170, 235, 175) if ratio < 0.66 else (220, 255, 220)
-        for i in range(count):
-            angle = base + i * (math.tau / count)
-            rad = radius * (0.55 + 0.45 * math.sin(base * 2.0 + i))
-            px = sx + math.cos(angle) * rad
-            py = sy + math.sin(angle) * rad
-            pygame.draw.circle(self.screen, color, (int(px), int(py)),
-                               max(2, self._zoom_len(2 + ratio * 3)))
-        ring = pygame.Surface((radius * 2 + 8, radius * 2 + 8), pygame.SRCALPHA)
-        alpha = int(90 + 130 * ratio)
-        pygame.draw.circle(ring, (150, 240, 170, alpha), (radius + 4, radius + 4), radius, 3)
-        self.screen.blit(ring, (sx - radius - 4, sy - radius - 4))
+    def _draw_mini_tornado(self, cx: float, cy: float, size: float, fade: float,
+                           t_phase: float) -> None:
+        """1 cây lốc nhỏ trong cụm Perfect Storm — chồng nhiều hình elip thu
+        nhỏ dần từ đáy (xanh đậm, rộng) lên đỉnh (xanh sáng, hẹp), mỗi lớp lắc
+        ngang lệch pha để trông như đang xoáy/lượn."""
+        if size < 2:
+            return
+        layers = 6
+        for k in range(layers):
+            frac = k / (layers - 1)               # 0 = đáy, 1 = đỉnh
+            lr = max(1, size * (1.0 - frac * 0.82))
+            sway = math.sin(t_phase * 3.2 + frac * 3.0) * size * 0.22 * frac
+            lx = cx + sway
+            ly = cy - frac * size * 1.35
+            col = (
+                int(40 + frac * 150),
+                int(110 + frac * 145),
+                int(65 + frac * 120),
+            )
+            alpha = int(fade * (195 - frac * 80))
+            layer_surf = pygame.Surface((int(lr * 2) + 2, int(lr * 0.9) + 2), pygame.SRCALPHA)
+            pygame.draw.ellipse(layer_surf, (*col, max(0, alpha)), layer_surf.get_rect())
+            self.screen.blit(layer_surf, layer_surf.get_rect(center=(lx, ly)))
+        # Điểm sáng ở đỉnh — tâm mắt lốc, nhấn tiêu điểm giống lốc thật.
+        top_y = cy - size * 1.35
+        core_r = max(1, int(size * 0.14))
+        core = pygame.Surface((core_r * 2, core_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(core, (225, 255, 220, int(fade * 210)), (core_r, core_r), core_r)
+        self.screen.blit(core, core.get_rect(center=(cx, top_y)))
 
     def _draw_ice_spiral_effect(self, effect: dict, frames: list[pygame.Surface], cam_x, cam_y) -> None:
+        """Vòng băng xoáy (Ice + Twist of Fate) — bẻ cong dải sprite băng
+        thành cung/vòng tròn quanh player, giống kỹ thuật _draw_vortex_beam
+        của Lightning, kèm 1 lớp glow cộng sáng cho ra vẻ phát sáng tương tự."""
         sx, sy = self.world_to_screen(effect['cx'], effect['cy'], cam_x, cam_y)
         orbit_radius = self._zoom_len(effect['radius'])
         if orbit_radius < 1:
@@ -1237,38 +1321,43 @@ class Renderer:
 
         # Chiều cao (độ dày) của băng
         target_h = max(4, self._zoom_len(78.0))
-
-        # 1. Tạo dải băng thẳng đã có sẵn animation trồi lên theo thời gian (age)
-        tiled_surf, _pad = self._tile_ice_spike_frames(frames, int(arc_len), target_h, effect.get('age', 0.0))
-        
-        # 2. Bẻ cong dải băng thành cung tròn bao quanh nhân vật
         start_angle = effect['aim_angle'] - arc_length_rad / 2
         N = max(32, int(arc_len / 5))
-        
-        for i in range(N):
-            t = (i + 0.5) / N
-            x0 = int(i * arc_len / N)
-            x1 = int((i + 1) * arc_len / N)
-            sw = max(1, x1 - x0)
-            
-            # Đảm bảo không cắt lố ảnh
-            if x0 >= tiled_surf.get_width():
-                continue
-            sw = min(sw, tiled_surf.get_width() - x0)
-            if sw < 1:
-                continue
-                
-            angle = start_angle + t * arc_length_rad
-            bx = sx + math.cos(angle) * orbit_radius
-            by = sy + math.sin(angle) * orbit_radius
-            tangent_deg = math.degrees(angle) + 90
 
-            strip = tiled_surf.subsurface((x0, 0, sw, tiled_surf.get_height()))
-            # Thêm 2px bề ngang để nối mí chồng lên nhau khít hoàn toàn
-            scaled = pygame.transform.smoothscale(strip, (sw + 2, target_h))
-            rotated = pygame.transform.rotate(scaled, -tangent_deg)
-            rect = rotated.get_rect(center=(int(bx), int(by)))
-            self.screen.blit(rotated, rect)
+        def _blit_bent_strips(src_frames: list[pygame.Surface], flags: int = 0) -> None:
+            tiled_surf, _pad = self._tile_ice_spike_frames(
+                src_frames, int(arc_len), target_h, effect.get('age', 0.0))
+            for i in range(N):
+                t = (i + 0.5) / N
+                x0 = int(i * arc_len / N)
+                x1 = int((i + 1) * arc_len / N)
+                sw = max(1, x1 - x0)
+
+                # Đảm bảo không cắt lố ảnh
+                if x0 >= tiled_surf.get_width():
+                    continue
+                sw = min(sw, tiled_surf.get_width() - x0)
+                if sw < 1:
+                    continue
+
+                angle = start_angle + t * arc_length_rad
+                bx = sx + math.cos(angle) * orbit_radius
+                by = sy + math.sin(angle) * orbit_radius
+                tangent_deg = math.degrees(angle) + 90
+
+                strip = tiled_surf.subsurface((x0, 0, sw, tiled_surf.get_height()))
+                # Thêm 2px bề ngang để nối mí chồng lên nhau khít hoàn toàn
+                scaled = pygame.transform.smoothscale(strip, (sw + 2, target_h))
+                rotated = pygame.transform.rotate(scaled, -tangent_deg)
+                rect = rotated.get_rect(center=(int(bx), int(by)))
+                self.screen.blit(rotated, rect, special_flags=flags)
+
+        # 1. Dải băng chính (đã có animation trồi lên theo age).
+        _blit_bent_strips(frames)
+        # 2. Lớp glow cộng sáng chồng lên — cho vòng xoáy phát sáng như Lightning.
+        glow_frames = self.effect_glow_animations.get('ice_spike')
+        if glow_frames:
+            _blit_bent_strips(glow_frames, pygame.BLEND_RGBA_ADD)
 
     def _draw_ice_spike_effect(self, effect: dict, frames: list[pygame.Surface], cam_x, cam_y) -> None:
         sx, sy = self.world_to_screen(effect['x'], effect['y'], cam_x, cam_y)
@@ -1375,9 +1464,12 @@ class Renderer:
         is_primary: bool = False,
     ) -> None:
         """
-        Vẽ vortex ring: vòng cung tròn (~315°) bao quanh player (sx,sy).
-        ex,ey xác định bán kính và vị trí khoảng hở.
-        PNG được cắt thành 64 strips, mỗi strip rotate theo tangent đường tròn.
+        Vẽ tia XOẮN ỐC (Twist of Fate) — MỘT đường liên tục duy nhất, bắt đầu
+        gần sát tâm người chơi (sx,sy) rồi xoay ra ngoài dần (bán kính tăng
+        theo góc) tới bán kính orbit_radius (xác định bởi ex,ey). Không phải
+        vòng tròn khép kín — đường xoắn hơn 1 vòng nên phần trong/ngoài không
+        chồng lên nhau lộn xộn, đúng hình dáng "xoắn ốc" tham khảo.
+        PNG được cắt thành nhiều strip, mỗi strip rotate theo tangent đường xoắn.
         """
         dx = ex - sx
         dy = ey - sy
@@ -1385,12 +1477,15 @@ class Renderer:
         if orbit_radius < 1 or frame is None:
             return
 
-        # Bán kính vòng cung và cung độ
-        gap_angle = math.atan2(dy, dx)
-        GAP       = 0.7             # ~40° khoảng hở
-        ARC       = math.tau - GAP  # ~320° cung tròn
-        arc_len   = orbit_radius * ARC
-        N         = max(32, int(arc_len / 5))  # Cứ 5px cắt 1 mảnh để mượt
+        # Góc bắt đầu (từ vị trí người chơi) và tổng góc quét — SWEEP > 360°
+        # để đọc rõ là xoắn ốc (nhiều hơn 1 vòng), bán kính tăng dần tuyến
+        # tính từ gần 0 (sát người chơi) tới orbit_radius ở cuối.
+        start_angle = math.atan2(dy, dx)
+        SWEEP = math.tau * 1.35   # ~1.35 vòng
+        MIN_RADIUS_RATIO = 0.06   # bắt đầu gần sát tâm, không phải đúng 0 (tránh méo tangent)
+        avg_radius = orbit_radius * (MIN_RADIUS_RATIO + 1.0) / 2
+        arc_len    = avg_radius * SWEEP
+        N          = max(48, int(arc_len / 2.2))  # Lát dày hơn — bù cho jitter zigzag lệch ngang mỗi lát
 
         frame_w = frame.get_width()
         frame_h = frame.get_height()
@@ -1405,34 +1500,54 @@ class Renderer:
             cw = cropped.get_width()
             ch = cropped.get_height()
 
-            # Tạo một dải liền mạch (tiled surface) có chiều dài bằng arc_len
-            tiled_surf = pygame.Surface((int(arc_len) + cw, ch), pygame.SRCALPHA)
-            x_offset = 0
-            
             # OVERLAP: Thay vì nối sát mép, ta nối lấn lên nhau 15% để dính liền khối
             advance = max(1, int(cw * 0.85))
-            
+
+            # Tạo một dải liền mạch (tiled surface) có chiều dài bằng arc_len —
+            # dư thêm `advance` bên trái vì tile đầu tiên bị lùi về -advance (xem dưới).
+            tiled_surf = pygame.Surface((int(arc_len) + cw + advance, ch), pygame.SRCALPHA)
+
+            # Tile LÙI 1 lần trước vị trí 0 — mép ĐẦU ảnh gốc thường mảnh/nhạt dần
+            # (ảnh tia chớp thon dần ở 2 đầu), nếu bắt đầu tile đúng tại 0 thì đầu
+            # xoắn ốc (gần người chơi nhất) sẽ bị "lỗ" nhạt/hụt. Tile lùi để phần
+            # ĐẶC của ảnh (giữa ảnh) lấp đúng vào điểm bắt đầu vẽ.
+            x_offset = -advance
             while x_offset <= arc_len:
                 tiled_surf.blit(cropped, (x_offset, 0), special_flags=pygame.BLEND_RGBA_MAX)
                 x_offset += advance
 
+            now = pygame.time.get_ticks() * 0.001
             for i in range(N):
                 t = (i + 0.5) / N
-                
+
                 # Cắt từ dải liền mạch
                 x0 = int(i * arc_len / N)
                 x1 = int((i + 1) * arc_len / N)
                 sw = max(1, x1 - x0)
-                
-                angle = gap_angle + GAP / 2 + t * ARC
-                bx = sx + math.cos(angle) * orbit_radius
-                by = sy + math.sin(angle) * orbit_radius
+
+                theta = t * SWEEP
+                r = orbit_radius * (MIN_RADIUS_RATIO + (1.0 - MIN_RADIUS_RATIO) * t)
+                angle = start_angle + theta
+                bx = sx + math.cos(angle) * r
+                by = sy + math.sin(angle) * r
+
+                # Zigzag: cắt lát mảnh theo tangent làm mất hẳn răng cưa tự nhiên
+                # của ảnh gốc (mỗi lát chỉ thấy 1 đoạn gần như thẳng) — bù lại bằng
+                # cách lệch NGANG xen kẽ qua từng lát, biên độ nhấp nháy theo thời
+                # gian, để tia trông có điện giật thật thay vì đường cong trơn.
+                zigzag_sign = 1.0 if i % 2 == 0 else -1.0
+                jitter = zigzag_sign * (2.5 + 2.0 * abs(math.sin(now * 6.0 + i * 0.7)))
+                perp_angle = angle + math.pi / 2
+                bx += math.cos(perp_angle) * jitter
+                by += math.sin(perp_angle) * jitter
 
                 tangent_deg = math.degrees(angle) + 90
 
-                strip = tiled_surf.subsurface((x0, 0, sw, ch))
-                # Scale bề dọc, giữ nguyên bề ngang (cộng thêm 2px để chồng mép khít hoàn toàn)
-                scaled = pygame.transform.smoothscale(strip, (sw + 2, target_h))
+                strip = tiled_surf.subsurface((x0 + advance, 0, sw, ch))
+                # Scale bề ngang RỘNG HƠN chiều dài lát thật (x2.2) để các lát
+                # chồng lấn nhau, phủ kín khoảng hở do jitter zigzag lệch ngang
+                # gây ra (nếu chỉ vừa khít sw thì mỗi lát lệch ngang sẽ hở nhau).
+                scaled = pygame.transform.smoothscale(strip, (int(sw * 2.2) + 4, target_h))
                 rotated = pygame.transform.rotate(scaled, -tangent_deg)
                 rect = rotated.get_rect(center=(int(bx), int(by)))
                 self.screen.blit(rotated, rect, special_flags=flags)
@@ -1502,6 +1617,7 @@ class Renderer:
                  ultimate_flash=None,
                  ice_charge=None,
                  active_effects=None,
+                 damage_numbers=None,
                  dt: float = 0.0) -> None:
         self.draw_background(cam_x, cam_y)
         player_sort_y = player.y + getattr(player, "radius", 0.0)
@@ -1511,18 +1627,14 @@ class Renderer:
             self._draw_ultimate_flash(ultimate_flash, cam_x, cam_y)
         if ice_charge:
             self.draw_ice_charge_preview(ice_charge, cam_x, cam_y)
-        if active_effects:
-            for effect in active_effects:
-                if effect.alive and getattr(effect, 'visual_type', '') == 'air_explosion':
-                    self.draw_active_effect(effect, cam_x, cam_y, dt)
         for orb in xp_orbs:
             if orb.alive:
                 self.draw_xp_orb(orb, cam_x, cam_y)
         for enemy in enemies:
             if enemy.alive:
-                self.draw_enemy(enemy, cam_x, cam_y)
+                self.draw_enemy(enemy, cam_x, cam_y, dt)
         if boss and boss.alive:
-            self.draw_boss(boss, cam_x, cam_y)
+            self.draw_boss(boss, cam_x, cam_y, dt)
         for eb in enemy_bullets:
             if eb.alive:
                 self.draw_enemy_bullet(eb, cam_x, cam_y)
@@ -1533,10 +1645,19 @@ class Renderer:
             self.draw_effects(effects, cam_x, cam_y)
         if active_effects:
             for effect in active_effects:
-                if effect.alive and getattr(effect, 'visual_type', '') != 'air_explosion':
+                # Vệt lửa mặt đất (fire_trail) vẽ SAU CÙNG (bên dưới), để cây/
+                # nhà "phía trước" người chơi không che khuất mất — nó là dấu
+                # vết trên mặt đất, phải luôn thấy được dọc đường đã đi qua.
+                if effect.alive and getattr(effect, 'visual_type', '') != 'fire_trail':
                     self.draw_active_effect(effect, cam_x, cam_y, dt)
         self.draw_player(player, cam_x, cam_y)
+        if damage_numbers:
+            self._draw_damage_numbers(damage_numbers, cam_x, cam_y)
         self.draw_map_decorations(cam_x, cam_y, min_sort_y=player_sort_y)
+        if active_effects:
+            for effect in active_effects:
+                if effect.alive and getattr(effect, 'visual_type', '') == 'fire_trail':
+                    self.draw_active_effect(effect, cam_x, cam_y, dt)
 
         # Cập nhật dt và sinh lá rơi từ các cây trong tầm nhìn
         now = pygame.time.get_ticks()
@@ -1592,7 +1713,7 @@ class Renderer:
     def draw_minimap(self, player, enemies, boss, cam_x, cam_y) -> None:
         size = 75
         pad = 5
-        x = SCREEN_W - size - pad
+        x = self.screen.get_width() - size - pad
         y = 18
         bg = pygame.Surface((size, size), pygame.SRCALPHA)
         bg.fill((10, 18, 20, 185))
@@ -1703,9 +1824,11 @@ class Renderer:
     # ── Helpers nội bộ ────────────────────────────────────────────────────────
 
     def _draw_status_halo(self, entity, sx: int, sy: int) -> None:
-        """Vẽ vòng màu ngoài entity tuỳ theo status effect đang hoạt động."""
+        """Vẽ hiệu ứng ngoài entity tuỳ theo status effect đang hoạt động."""
+        if any(eff.type == 'burn' for eff in entity.status_effects):
+            self._draw_burn_effect(entity, sx, sy)
+            return
         _COLOR_MAP = {
-            'burn':   self.COLOR_BURN,
             'chill':  self.COLOR_CHILL,
             'slow':   self.COLOR_SLOW,
             'stun':   self.COLOR_STUN,
@@ -1719,26 +1842,118 @@ class Renderer:
                     (sx, sy), self._zoom_len(entity.radius + 4), 3)
                 break  # Chỉ vẽ halo của effect đầu tiên
 
+    def _draw_burn_effect(self, entity, sx: int, sy: int) -> None:
+        """Cháy (burn): quầng cam mờ nhấp nháy + vài lưỡi lửa nhỏ lắc quanh
+        chân, thay cho vòng tròn phẳng cũ. seed theo id(entity) để nhiều quái
+        cháy cùng lúc không nhấp nháy y hệt nhau (lệch pha theo id())."""
+        now      = pygame.time.get_ticks() / 1000.0
+        seed     = (id(entity) % 997) * 0.013
+        base_r   = self._zoom_len(entity.radius)
+        foot_y   = sy + base_r * 0.5
+
+        glow_pulse = 0.7 + 0.3 * math.sin(now * 5.0 + seed)
+        glow_r = max(1, int(base_r * 0.9 * glow_pulse))
+        glow = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (255, 130, 20, 70), (glow_r, glow_r), glow_r)
+        self.screen.blit(glow, (sx - glow_r, foot_y - glow_r))
+
+        for i in range(3):
+            phase = now * 7.0 + i * 2.4 + seed
+            flick = 0.55 + 0.45 * abs(math.sin(phase))
+            ang   = (i / 3) * 2 * math.pi + math.sin(now * 1.6 + seed) * 0.4
+            fx    = sx + math.cos(ang) * base_r * 0.6
+            h     = max(2, int(self._zoom_len(10) * flick))
+            w     = max(1, int(self._zoom_len(4) * flick))
+            sway  = math.sin(phase * 2.2) * w * 0.6
+            t     = 0.5 + 0.5 * math.sin(phase * 1.9)
+            color = (255, int(90 + 70 * t), int(15 * t))
+            points = [
+                (fx + sway, foot_y - h),
+                (fx - w, foot_y),
+                (fx, foot_y + h * 0.15),
+                (fx + w, foot_y),
+            ]
+            pygame.draw.polygon(self.screen, color, points)
+
+    @staticmethod
+    def _hit_shake_offset(entity, hurt_duration: float = 0.3) -> tuple:
+        """Lắc nhẹ theo trục ngang ngay lúc trúng đòn, tắt dần theo hurt_timer
+        — quái không còn đứng "đơ" khi bị đánh."""
+        hurt = getattr(entity, 'hurt_timer', 0.0)
+        if hurt <= 0:
+            return 0.0, 0.0
+        ratio  = hurt / hurt_duration
+        seed   = id(entity) % 100
+        offset = math.sin((hurt_duration - hurt) * 45.0 + seed) * 3.0 * ratio
+        return offset, 0.0
+
+    @staticmethod
+    def _hp_gradient_color(ratio: float) -> tuple:
+        """Nội suy màu theo % máu: đỏ (thấp) -> vàng (giữa) -> xanh lá (đầy)."""
+        ratio = max(0.0, min(1.0, ratio))
+        if ratio >= 0.5:
+            t = (ratio - 0.5) / 0.5
+            return (int(235 + (70 - 235) * t), 200, int(40 + (90 - 40) * t))
+        t = ratio / 0.5
+        return (int(205 + (235 - 205) * t), int(40 + (200 - 40) * t), 40)
+
     def _draw_hp_bar(self, entity, sx: int, sy: int,
                      offset_y: int, bar_w: int | None = None,
-                     bar_h: int = 3, color=(205, 18, 62)) -> None:
+                     bar_h: int = 3, color=None, dt: float = 0.0) -> None:
         hp_ratio = entity.get_hp_ratio()
-        if hp_ratio >= 1.0:
+
+        # Vệt sáng "vừa mất máu" trễ dần theo sau (juice effect) — theo dõi
+        # riêng từng entity qua 1 attribute tạm renderer tự set/đọc, không
+        # đụng gì tới state game thật (giống cách is_crit được gán ngoài).
+        trail = getattr(entity, '_hp_trail', hp_ratio)
+        trail = max(hp_ratio, trail - dt * 0.6) if hp_ratio < trail else hp_ratio
+        entity._hp_trail = trail
+
+        if hp_ratio >= 1.0 and trail >= 1.0:
             return
 
         if bar_w is None:
             bar_w = max(self._zoom_len(24), int(offset_y * 1.35))
 
         bar_w = max(1, int(bar_w))
-        bar_h = max(1, int(bar_h))
+        bar_h = max(2, int(bar_h))
         bar_x = int(sx - bar_w / 2)
         bar_y = int(sy - offset_y)
-        # Nền đỏ tối
-        fill_w = int(round(bar_w * hp_ratio))
-        pygame.draw.rect(self.screen, (70, 12, 28), (bar_x, bar_y + bar_h, bar_w, 1))
-        pygame.draw.rect(self.screen, (75, 6, 22), (bar_x, bar_y, bar_w, bar_h))
+
+        fill_w  = int(round(bar_w * hp_ratio))
+        trail_w = int(round(bar_w * trail))
+        fg_color = color if color is not None else self._hp_gradient_color(hp_ratio)
+
+        # Viền ngoài tối + nền trong.
+        pygame.draw.rect(self.screen, (18, 8, 10), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2))
+        pygame.draw.rect(self.screen, (72, 22, 26), (bar_x, bar_y, bar_w, bar_h))
+        # Vệt sáng phần máu vừa mất, nằm dưới phần máu hiện tại.
+        if trail_w > fill_w:
+            pygame.draw.rect(self.screen, (235, 225, 195),
+                             (bar_x + fill_w, bar_y, trail_w - fill_w, bar_h))
         if fill_w > 0:
-            pygame.draw.rect(self.screen, color, (bar_x, bar_y, fill_w, bar_h))
+            pygame.draw.rect(self.screen, fg_color, (bar_x, bar_y, fill_w, bar_h))
+            if bar_h >= 3:
+                top_color = tuple(min(255, c + 45) for c in fg_color)
+                pygame.draw.rect(self.screen, top_color, (bar_x, bar_y, fill_w, 1))
+
+    def _draw_damage_numbers(self, damage_numbers: list[dict], cam_x, cam_y) -> None:
+        """Số dmg bay lên + mờ dần tại điểm trúng đòn. Crit: to hơn, màu vàng
+        cam, thường: trắng ngà nhỏ hơn."""
+        for d in damage_numbers:
+            sx, sy = self.world_to_screen(d['x'], d['y'], cam_x, cam_y)
+            t = min(1.0, d['age'] / max(0.001, d['duration']))
+            alpha = 255 if t < 0.55 else int(255 * max(0.0, 1.0 - (t - 0.55) / 0.45))
+            is_crit = d.get('is_crit', False)
+            font  = self._dmg_font_crit if is_crit else self._dmg_font
+            color = (255, 200, 40) if is_crit else (255, 240, 230)
+            shadow = font.render(d['text'], True, (25, 10, 10))
+            main   = font.render(d['text'], True, color)
+            shadow.set_alpha(alpha)
+            main.set_alpha(alpha)
+            rect = main.get_rect(center=(sx, sy))
+            self.screen.blit(shadow, (rect.x + 1, rect.y + 1))
+            self.screen.blit(main, rect)
 
     def _spawn_leaf(self, x: float, y: float) -> None:
         import random as _rnd
@@ -1794,7 +2009,8 @@ class Renderer:
             sx, sy = self.world_to_screen(leaf["x"], leaf["y"], cam_x, cam_y)
             
             # Nếu lá nằm trong màn hình
-            if -30 <= sx <= SCREEN_W + 30 and -30 <= sy <= SCREEN_H + 30:
+            buf_w, buf_h = self.screen.get_size()
+            if -30 <= sx <= buf_w + 30 and -30 <= sy <= buf_h + 30:
                 w = max(1, self._zoom_len(leaf["size_w"]))
                 h = max(1, self._zoom_len(leaf["size_h"]))
                 
