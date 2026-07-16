@@ -194,6 +194,9 @@ class GameLoop:
 
         👉 BƯỚC TIẾP THEO (Bước 4): Mọi thứ đã sẵn sàng. Trò chơi bắt đầu chạy. Hãy tìm hàm `run` để xem vòng lặp vô tận.
         """
+        audio = getattr(self, "audio", None)
+        if audio is not None:
+            audio.stop_music()   # reset nhạc boss khi chơi lại / về menu
         self.player        = Player(WORLD_CENTER_X, WORLD_CENTER_Y)
         self.enemies: list[Enemy]             = []
         self.boss:    Boss | None             = None
@@ -602,6 +605,7 @@ class GameLoop:
                     self.level_mgr.trigger_level_up(self.wave_mgr.wave,
                                                      self.player)
                     self.state = self.STATE_LEVEL_UP
+                    self.audio.play("level_up")
 
         # 11. Wave manager (creative: tắt spawn tự động, tự bấm phím spawn)
         if self.wave_auto:
@@ -630,8 +634,10 @@ class GameLoop:
         if not self.creative_mode:
             if not self.player.alive:
                 self.state = self.STATE_GAME_OVER
+                self.audio.stop_music()
             if self.boss and not self.boss.alive:
                 self.state = self.STATE_WIN
+                self.audio.stop_music()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1757,6 +1763,7 @@ class GameLoop:
         target.take_damage(amount)
         if amount <= 0:
             return
+        self.audio.play("on_hit", throttle_ms=90)
         self._spawn_damage_number(target.x, target.y - target.radius, amount, is_crit)
 
     def _handle_effect_collisions(self) -> None:
@@ -2094,6 +2101,7 @@ class GameLoop:
         if events.get('spawn_boss'):
             self.boss = Boss(self.player.x + 650, self.player.y, hp_mult, speed_mult)
             self._place_entity_on_valid_map_spot(self.boss)
+            self.audio.play_music("boss")
             
         summon_count = events.get('summon_enemies', 0)
         if summon_count and self.boss:
@@ -2188,6 +2196,7 @@ class GameLoop:
             self._camera_x(), self._camera_y(), self.renderer.zoom)
         if kind == 'boss':
             self.boss = Boss(wx, wy)
+            self.audio.play_music("boss")
             return
         cls = {'enemy': Enemy, 'ranged': RangedEnemy, 'fast': FastEnemy,
                'tank': TankEnemy, 'dummy': DummyEnemy}[kind]
