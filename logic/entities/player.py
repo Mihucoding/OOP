@@ -219,16 +219,16 @@ class Player:
     # ── HP ────────────────────────────────────────────────────────────────────
 
     def take_damage(self, amount: float) -> None:
-        if getattr(self, "noclip_mode", False) or getattr(self, "god_mode", False):
-            return
-        reduced = amount * (1.0 - self.armor / 100.0)
-        self.hp -= reduced
-        if reduced > 0 and self.alive:
-            self.hurt_timer = 0.35
-        if self.hp <= 0:
-            self.hp    = 0
-            self.alive = False
-
+        # if getattr(self, "noclip_mode", False) or getattr(self, "god_mode", False):
+        #     return
+        # reduced = amount * (1.0 - self.armor / 100.0)
+        # self.hp -= reduced
+        # if reduced > 0 and self.alive:
+        #     self.hurt_timer = 0.35
+        # if self.hp <= 0:
+        #     self.hp    = 0
+        #     self.alive = False
+        pass
     # ── XP ────────────────────────────────────────────────────────────────────
 
     def add_xp(self, amount: int) -> bool:

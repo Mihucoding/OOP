@@ -23,6 +23,7 @@ from logic.entities.xp_orb       import XPOrb
 from logic.wave.wave_manager     import WaveManager
 from logic.leveling.level_manager import LevelManager
 from ui.renderer                  import Renderer, SCREEN_W, SCREEN_H, WINDOW_W, WINDOW_H, ZOOM
+from ui.audio                     import AudioManager
 from ui.hud                       import HUD
 from ui.input_handler             import InputHandler
 from ui.vfx_manager               import vfx_lib
@@ -126,6 +127,7 @@ class GameLoop:
         pygame.display.set_caption("Rune Craft Roguelike")
         self._load_custom_cursor()
         self.clock = pygame.time.Clock()
+        self.audio = AudioManager()
 
         font_big   = self._load_font(36)
         font_small = self._load_font(14)
@@ -201,6 +203,7 @@ class GameLoop:
         self.effects: list[dict]               = []
         self.active_effects: list              = []
         self.damage_numbers: list[dict]        = []   # số dmg bay lên khi quái trúng đòn
+        self._footstep_timer    = 0.0     # đếm nhịp phát tiếng bước chân
         self._fire_cast_active  = False   # đang vung tay bắn lửa (đứng im)?
         self._fire_cast_elapsed = 0.0     # ms đã trôi qua trong lượt vung tay
         self._fire_cast_fired   = False   # đã bắn đạn ở khung release chưa
@@ -246,6 +249,7 @@ class GameLoop:
     DOUBLE_TAP_TIME = 0.30
     BREATH_MAX_FUEL = 2.5
     BREATH_DPS_MULT = 1.6
+    FOOTSTEP_INTERVAL = 0.32   # giây giữa 2 tiếng bước chân khi di chuyển
 
     # ── Vòng lặp chính ────────────────────────────────────────────────────────
 
@@ -453,6 +457,7 @@ class GameLoop:
         self.player.update(dt, mx, my)
         self._resolve_player_map_collision(old_x, old_y)
         self._update_camera(dt)
+        self._update_footsteps(dt, old_x, old_y)
 
         # 2. Bắn đạn player (khoá bắn khi đang mở bảng chọn tổ hợp rune)
         channeled_lightning = False
@@ -489,6 +494,7 @@ class GameLoop:
                     self._spawn_wind_boomerang(wx, wy)
                 else:
                     self._spawn_bullet(wx, wy)
+                    self.audio.play("fire_spray")
                 self.player.reset_fire_timer()
         elif fire_bolt_ready and self._fire_cast_active:
             self._update_fire_cast(dt, wx, wy)
@@ -786,6 +792,8 @@ class GameLoop:
         if not attacks:
             self.ice_charge = None
             return
+
+        self.audio.play("ice_barrage")
 
         stack = getattr(ice_rune, "element_stack", 1)
         boss_alive_before = self.boss is not None and self.boss.alive
@@ -1551,6 +1559,7 @@ class GameLoop:
             self._fire_cast_fired   = False
             self._fire_cast_target  = (wx, wy)
             self.player.cast_anim   = 'fire'
+            self.audio.play("fireball")
 
         self._fire_cast_elapsed += dt * 1000.0
         self.player.cast_lock_timer = max(
@@ -2406,6 +2415,20 @@ class GameLoop:
         self.damage_numbers = [
             d for d in self.damage_numbers if d['age'] < d['duration']
         ]
+
+    def _update_footsteps(self, dt: float, old_x: float, old_y: float) -> None:
+        """Phát tiếng bước chân theo nhịp khi player thực sự dịch chuyển.
+
+        Dùng khoảng cách đã đi (sau va chạm) để không kêu khi đi vào tường.
+        """
+        moved = math.hypot(self.player.x - old_x, self.player.y - old_y)
+        if moved < 0.5:
+            self._footstep_timer = self.FOOTSTEP_INTERVAL   # đứng yên → bước kế tiếp kêu ngay
+            return
+        self._footstep_timer -= dt
+        if self._footstep_timer <= 0.0:
+            self.audio.play("footstep")
+            self._footstep_timer = self.FOOTSTEP_INTERVAL
 
     def _update_camera(self, dt: float) -> None:
         follow = min(1.0, CAMERA_FOLLOW_SPEED * dt)
