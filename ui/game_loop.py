@@ -23,6 +23,7 @@ from logic.entities.xp_orb       import XPOrb
 from logic.wave.wave_manager     import WaveManager
 from logic.leveling.level_manager import LevelManager
 from ui.renderer                  import Renderer, SCREEN_W, SCREEN_H, WINDOW_W, WINDOW_H, ZOOM
+from ui.audio                     import AudioManager
 from ui.hud                       import HUD
 from ui.input_handler             import InputHandler
 from ui.vfx_manager               import vfx_lib
@@ -126,9 +127,10 @@ class GameLoop:
         pygame.display.set_caption("Rune Craft Roguelike")
         self._load_custom_cursor()
         self.clock = pygame.time.Clock()
+        self.audio = AudioManager()
 
         font_big   = self._load_font(36)
-        font_small = self._load_font(14)
+        font_small = self._load_font(20)
         
         self.font_big = font_big
         self.font_small = font_small
@@ -192,6 +194,9 @@ class GameLoop:
 
         👉 BƯỚC TIẾP THEO (Bước 4): Mọi thứ đã sẵn sàng. Trò chơi bắt đầu chạy. Hãy tìm hàm `run` để xem vòng lặp vô tận.
         """
+        audio = getattr(self, "audio", None)
+        if audio is not None:
+            audio.stop_music()   # reset nhạc boss khi chơi lại / về menu
         self.player        = Player(WORLD_CENTER_X, WORLD_CENTER_Y)
         self.enemies: list[Enemy]             = []
         self.boss:    Boss | None             = None
@@ -201,6 +206,7 @@ class GameLoop:
         self.effects: list[dict]               = []
         self.active_effects: list              = []
         self.damage_numbers: list[dict]        = []   # số dmg bay lên khi quái trúng đòn
+        self._footstep_timer    = 0.0     # đếm nhịp phát tiếng bước chân
         self._fire_cast_active  = False   # đang vung tay bắn lửa (đứng im)?
         self._fire_cast_elapsed = 0.0     # ms đã trôi qua trong lượt vung tay
         self._fire_cast_fired   = False   # đã bắn đạn ở khung release chưa
@@ -246,6 +252,7 @@ class GameLoop:
     DOUBLE_TAP_TIME = 0.30
     BREATH_MAX_FUEL = 2.5
     BREATH_DPS_MULT = 1.6
+    FOOTSTEP_INTERVAL = 0.32   # giây giữa 2 tiếng bước chân khi di chuyển
 
     # ── Vòng lặp chính ────────────────────────────────────────────────────────
 
@@ -303,6 +310,10 @@ class GameLoop:
             self._cheat_add_all_runes()
             self.cheat_mode = True
             self.player.cheat_mode = True
+
+
+
+            
             print("[CHEAT] All runes added")
             return None
 
@@ -453,6 +464,7 @@ class GameLoop:
         self.player.update(dt, mx, my)
         self._resolve_player_map_collision(old_x, old_y)
         self._update_camera(dt)
+        self._update_footsteps(dt, moving_input)
 
         # 2. Bắn đạn player (khoá bắn khi đang mở bảng chọn tổ hợp rune)
         channeled_lightning = False
@@ -489,6 +501,7 @@ class GameLoop:
                     self._spawn_wind_boomerang(wx, wy)
                 else:
                     self._spawn_bullet(wx, wy)
+                    self.audio.play("fire_spray")
                 self.player.reset_fire_timer()
         elif fire_bolt_ready and self._fire_cast_active:
             self._update_fire_cast(dt, wx, wy)
@@ -596,6 +609,7 @@ class GameLoop:
                     self.level_mgr.trigger_level_up(self.wave_mgr.wave,
                                                      self.player)
                     self.state = self.STATE_LEVEL_UP
+                    self.audio.play("level_up")
 
         # 11. Wave manager (creative: tắt spawn tự động, tự bấm phím spawn)
         if self.wave_auto:
@@ -624,8 +638,10 @@ class GameLoop:
         if not self.creative_mode:
             if not self.player.alive:
                 self.state = self.STATE_GAME_OVER
+                self.audio.stop_music()
             if self.boss and not self.boss.alive:
                 self.state = self.STATE_WIN
+                self.audio.stop_music()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -787,6 +803,8 @@ class GameLoop:
             self.ice_charge = None
             return
 
+        self.audio.play("ice_barrage")
+
         stack = getattr(ice_rune, "element_stack", 1)
         boss_alive_before = self.boss is not None and self.boss.alive
         enemy_alive_before = {id(enemy) for enemy in self.enemies if enemy.alive}
@@ -886,7 +904,12 @@ class GameLoop:
 
             # Gai thẳng: Hit-And-Run bẻ thành chuỗi đoạn phản xạ tường (1 đoạn
             # nếu không có rune này) — mỗi đoạn dừng ở địch gần nhất (không
-            # xuyên), dừng LUÔN chuỗi ngay khi 1 đoạn chặn trúng địch.
+            # xuyên TRONG CÙNG 1 đoạn), nhưng trúng địch KHÔNG huỷ các đoạn
+            # phản xạ phía sau: gai vẫn bật sang hướng mới sau khi chạm quái,
+            # có thể trúng tiếp quái khác ở đoạn bounce kế — đúng ý "ricochet"
+            # của Hit-And-Run (trước đây trúng quái là dừng LUÔN cả chuỗi,
+            # khiến bounce gần như không bao giờ thấy được vì lúc nào cũng
+            # ngắm vào quái trước khi kịp chạm tường).
             for seg_attack in self._build_ice_bounce_segments(attack, bounce_max):
                 self._cap_ice_attack_at_first_enemy(seg_attack)
                 hits = self._targets_in_ice_hitbox(seg_attack)
@@ -907,8 +930,6 @@ class GameLoop:
                 for mod in trail_mods:
                     mod.leave_trail_along(seg_attack["start_x"], seg_attack["start_y"],
                                           seg_attack["end_x"], seg_attack["end_y"], context)
-                if hits:
-                    break   # đoạn này chặn trúng địch → không đi tiếp đoạn sau
         for enemy in self.enemies:
             if id(enemy) in enemy_alive_before and not enemy.alive:
                 self.xp_orbs.extend(enemy.drop_xp(self.player.lucky))
@@ -1235,7 +1256,9 @@ class GameLoop:
         for dir_x, dir_y, start_x, start_y in beams:
             # Hit-And-Run: bẻ tia thành chuỗi đoạn phản xạ tường (1 đoạn nếu
             # không có rune này) — mỗi đoạn dừng ở địch GẦN NHẤT (không chain,
-            # không xuyên), dừng LUÔN chuỗi ngay khi 1 đoạn chặn trúng địch.
+            # không xuyên TRONG CÙNG 1 đoạn), nhưng trúng địch KHÔNG huỷ các
+            # đoạn phản xạ phía sau: tia vẫn bật sang hướng mới sau khi chạm
+            # quái, có thể trúng tiếp quái khác ở đoạn bounce kế.
             if bounce_max > 0:
                 segments = self._reflect_segment_chain(
                     start_x, start_y, dir_x, dir_y, LIGHTNING_BEAM_RANGE, bounce_max)
@@ -1261,8 +1284,6 @@ class GameLoop:
 
                 self._set_primary_lightning_beam(sx, sy, ex, ey, beam_id=next_beam_id, vortex=False)
                 next_beam_id += 1
-                if beam_hits:
-                    break   # đoạn này chặn trúng địch → không đi tiếp đoạn sau
 
         self._trim_primary_lightning_beams(next_beam_id)
         self._drop_xp_from_ultimate_kills(alive_before, boss_alive_before)
@@ -1551,6 +1572,7 @@ class GameLoop:
             self._fire_cast_fired   = False
             self._fire_cast_target  = (wx, wy)
             self.player.cast_anim   = 'fire'
+            self.audio.play("fireball")
 
         self._fire_cast_elapsed += dt * 1000.0
         self.player.cast_lock_timer = max(
@@ -1748,6 +1770,7 @@ class GameLoop:
         target.take_damage(amount)
         if amount <= 0:
             return
+        self.audio.play("on_hit", throttle_ms=90)
         self._spawn_damage_number(target.x, target.y - target.radius, amount, is_crit)
 
     def _handle_effect_collisions(self) -> None:
@@ -2085,7 +2108,8 @@ class GameLoop:
         if events.get('spawn_boss'):
             self.boss = Boss(self.player.x + 650, self.player.y, hp_mult, speed_mult)
             self._place_entity_on_valid_map_spot(self.boss)
-            
+            self.audio.play_music("boss")
+
         summon_count = events.get('summon_enemies', 0)
         if summon_count and self.boss:
             for i in range(summon_count):
@@ -2179,6 +2203,7 @@ class GameLoop:
             self._camera_x(), self._camera_y(), self.renderer.zoom)
         if kind == 'boss':
             self.boss = Boss(wx, wy)
+            self.audio.play_music("boss")
             return
         cls = {'enemy': Enemy, 'ranged': RangedEnemy, 'fast': FastEnemy,
                'tank': TankEnemy, 'dummy': DummyEnemy}[kind]
@@ -2394,6 +2419,8 @@ class GameLoop:
             self.boss.xp_dropped = True
             self.xp_orbs.extend(self.boss.drop_xp(self.player.lucky))
 
+        self._fall_rolling_stones()
+
         self.bullets       = [b  for b  in self.bullets       if b.alive]
         self.enemies       = [e  for e  in self.enemies        if e.alive]
         self.xp_orbs       = [o  for o  in self.xp_orbs        if o.alive]
@@ -2406,6 +2433,104 @@ class GameLoop:
         self.damage_numbers = [
             d for d in self.damage_numbers if d['age'] < d['duration']
         ]
+
+    def _fall_rolling_stones(self) -> None:
+        """Rolling Stone: tảng đá dừng lăn (rơi xuống) khi trúng quái đầu
+        tiên (pierce_remaining=0 → Bullet.on_hit tự set alive=False) hoặc
+        khi đã lăn đủ MAX_ROLL_DISTANCE mà chưa trúng ai. Gọi TRƯỚC khi
+        self.bullets bị lọc bỏ đạn chết (_cleanup) để còn kịp đọc x/y cuối
+        cùng của nó. Biến vị trí đó thành 1 tảng đá TĨNH VĨNH VIỄN — thêm 1
+        decoration (tái dùng world_map.rock_sprites, khỏi cần vẽ sprite
+        riêng) + 1 collision_rect vào world_map — tự động chặn
+        player/quái/boss (đều dùng chung collision_rects, xem
+        _resolve_entity_map_collision) và tự động phản xạ Hit-And-Run
+        (raycast_reflect cũng chỉ xét collision_rects), không cần viết thêm
+        code chặn riêng cho tảng đá đã rơi."""
+        world_map = getattr(self.renderer, "world_map", None)
+        if world_map is None or not getattr(world_map, "rock_sprites", None):
+            return
+        from logic.rune.modifiers.rolling_stone_modifier import RollingStoneModifier
+
+        for bullet in self.bullets:
+            if getattr(bullet, 'visual_type', None) != 'rolling_boulder':
+                continue
+            if bullet.alive:
+                ox = getattr(bullet, '_roll_origin_x', bullet.x)
+                oy = getattr(bullet, '_roll_origin_y', bullet.y)
+                rolled = math.hypot(bullet.x - ox, bullet.y - oy)
+                if rolled < RollingStoneModifier.MAX_ROLL_DISTANCE:
+                    continue
+                bullet.alive = False   # đi đủ xa mà chưa trúng ai → tự rơi
+
+            sprite = random.choice(world_map.rock_sprites)
+            img = sprite[0]
+            world_map.decorations.append({
+                "kind": "rock",
+                "frames": sprite,
+                "x": bullet.x - img.get_width() / 2,
+                "y": bullet.y - img.get_height() / 2,
+                "sort_y": bullet.y,
+            })
+            radius = RollingStoneModifier.ROLL_RADIUS
+            rock_rect = pygame.Rect(
+                int(bullet.x - radius), int(bullet.y - radius),
+                int(radius * 2), int(radius * 2))
+            world_map.collision_rects.append(rock_rect)
+            # Đá rơi ĐÚNG chỗ quái vừa bị trúng → quái (hoặc player đứng gần)
+            # có thể đang kẹt NGAY BÊN TRONG rect mới này. Hệ va chạm hiện có
+            # (_resolve_entity_map_collision) chỉ CHẶN đi vào, không có logic
+            # đẩy ra khi đã lỡ đứng bên trong — không đẩy thủ công thì đứng
+            # yên vĩnh viễn (mọi bước di chuyển nhỏ mỗi frame vẫn tính là
+            # "còn trong đá"). Đẩy ngay ra rìa rect lúc vừa tạo để tránh kẹt.
+            self._push_entities_out_of_rect(rock_rect)
+
+    def _push_entities_out_of_rect(self, rect: pygame.Rect) -> None:
+        """Đẩy player/quái/boss đang đứng ĐÈ lên `rect` ra rìa ngay lập tức —
+        dùng khi 1 collision_rect MỚI (VD tảng đá Rolling Stone) xuất hiện
+        đúng chỗ 1 entity đang đứng. Không gọi hàm này thì entity đó kẹt
+        vĩnh viễn, vì _resolve_entity_map_collision chỉ chặn di chuyển VÀO
+        rect, không xử lý trường hợp đã ở sẵn bên trong."""
+        candidates = [e for e in self.enemies if e.alive]
+        if self.boss and self.boss.alive:
+            candidates.append(self.boss)
+        candidates.append(self.player)
+
+        cx, cy = rect.center
+        push_dist = math.hypot(rect.width, rect.height) / 2 + 4.0   # ra khỏi rìa rect + đệm an toàn
+        for entity in candidates:
+            radius = self._entity_map_collision_radius(entity)
+            closest_x = max(rect.left, min(entity.x, rect.right))
+            closest_y = max(rect.top, min(entity.y, rect.bottom))
+            dx, dy = entity.x - closest_x, entity.y - closest_y
+            if math.hypot(dx, dy) >= radius:
+                continue   # chưa chạm rect này, khỏi cần đẩy
+
+            away_x, away_y = entity.x - cx, entity.y - cy
+            dist = math.hypot(away_x, away_y)
+            if dist < 1e-6:
+                away_x, away_y, dist = 1.0, 0.0, 1.0   # đứng đúng tâm rect → đẩy đại 1 hướng
+            ux, uy = away_x / dist, away_y / dist
+            entity.x = cx + ux * (push_dist + radius)
+            entity.y = cy + uy * (push_dist + radius)
+
+    def _update_footsteps(self, dt: float, moving_input: bool) -> None:
+        """Phát tiếng bước chân theo nhịp khi có PHÍM di chuyển đang được giữ.
+
+        Xét theo phím đang giữ (moving_input, tính sẵn ở _update từ
+        input.get_move_direction()) chứ KHÔNG xét quãng đường thực đi được —
+        nếu xét theo quãng đường, lúc player bị chặn bởi tường (đứng yên dù
+        vẫn giữ phím) tiếng bước chân sẽ tắt sai dù người chơi vẫn đang bấm.
+        Dừng NGAY tiếng đang phát khi buông hết phím — clip gốc dài hơn nhịp
+        bước nên nếu không stop() thủ công thì tiếng cứ kêu tiếp dù đã buông.
+        """
+        if not moving_input:
+            self._footstep_timer = 0.0   # buông phím → lần bấm KẾ TIẾP kêu NGAY, không đợi hết nhịp
+            self.audio.stop("footstep")
+            return
+        self._footstep_timer -= dt
+        if self._footstep_timer <= 0.0:
+            self.audio.play("footstep")
+            self._footstep_timer = self.FOOTSTEP_INTERVAL
 
     def _update_camera(self, dt: float) -> None:
         follow = min(1.0, CAMERA_FOLLOW_SPEED * dt)

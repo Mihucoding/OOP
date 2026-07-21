@@ -107,11 +107,63 @@ class RuneTree:
 
         👉 BƯỚC TIẾP THEO (Bước 13): Ngọc khởi tạo đạn xong, hệ thống sẽ di chuyển đạn mỗi frame. Hãy mở file [logic/entities/bullet.py](file:///c:/Users/acer/Downloads/OOP-mihu_branch/logic/entities/bullet.py) hàm `update` để xem nó.
         """
-        """Gọi khi đạn bắn. Trả về list đạn phụ (cast-graph rune tạo thêm)."""
+        """Gọi khi đạn bắn. Trả về list đạn phụ.
+
+        Thứ tự BẮT BUỘC: tính cast-graph (Frenetic Energy, Stars Aligned,
+        Flash of Swords...) TRƯỚC để biết cast gốc thực sự nhân ra bao nhiêu
+        bản (root_spawns), RỒI mới cho MỖI bản (kể cả bản gốc) chạy qua
+        modifier "kiểu cũ" (on_fire/on_update — Destructive Path, Heavy
+        Hitter, Split...) ĐÚNG 1 LẦN, cùng xuất phát từ 1 mức base đã áp mult
+        cast-graph. Vì Frenetic/Stars Aligned KHÔNG set OWNS_SUBTREE=True nên
+        các bản chúng nhân ra vẫn thuộc CHUNG 1 cast gốc (không tách nhánh
+        riêng) — modifier kiểu cũ gắn trong cây phải áp cho đủ mọi bản, không
+        chỉ bản gốc, nếu không sẽ vênh với cách cast-graph đã tự áp
+        damage_mult/batch đồng nhất cho cả 4 bản từ trước giờ."""
+        root_params, trigger_params, trigger_reference, order = self.resolve_cast_graph()
+        has_cast_graph = bool(
+            order or root_params.batches
+            or root_params.damage_mult != 1.0
+            or root_params.speed_mult != 1.0
+            or root_params.size_mult != 1.0
+            or root_params.orbit)
+
         new_bullets: list = []
-        for mod in self._fire_order(self.modifiers):
-            self._traverse_fire(mod, bullet, context, new_bullets, depth=1)
-        new_bullets.extend(self.resolve_and_fire_cast_graph(bullet, context))
+
+        if not has_cast_graph:
+            # Không có rune cast-graph nào tham gia → hành vi thuần cũ.
+            for mod in self._fire_order(self.modifiers):
+                self._traverse_fire(mod, bullet, context, new_bullets, depth=1)
+            return new_bullets
+
+        bullet.damage *= root_params.damage_mult
+        bullet.vx     *= root_params.speed_mult
+        bullet.vy     *= root_params.speed_mult
+        bullet.radius *= root_params.size_mult
+
+        base_angle = math.atan2(bullet.vy, bullet.vx)
+        root_positions = self.resolve_batch_positions(bullet.x, bullet.y, base_angle, root_params.batches)
+        root_spawns = [bullet]
+        for x, y, jitter_deg in root_positions[1:]:   # [0] la ban goc (chinh bullet), khong tao them
+            copy = self._spawn_copy_at(bullet, x, y, base_angle, jitter_deg)
+            root_spawns.append(copy)
+            new_bullets.append(copy)
+
+        # Modifier kiểu cũ chạy đúng 1 lần cho MỖI bản (gốc + mọi bản Frenetic/
+        # Stars Aligned nhân ra) — xem lý do ở docstring phía trên.
+        for spawn in root_spawns:
+            for mod in self._fire_order(self.modifiers):
+                self._traverse_fire(mod, spawn, context, new_bullets, depth=1)
+
+        # Self-Centered gắn vào Spell gốc → mọi bản của Spell quay quanh player.
+        if root_params.orbit:
+            for i, spawn in enumerate(root_spawns):
+                self._start_orbit(spawn, root_params, base_angle, i, len(root_spawns))
+
+        new_bullets.extend(self.dispatch_trigger_firings(
+            bullet.x, bullet.y, bullet.vx, bullet.vy, bullet.damage,
+            root_params.spawn_count, trigger_params, trigger_reference, order,
+            context, source=bullet))
+
         return new_bullets
 
     @staticmethod
@@ -214,43 +266,6 @@ class RuneTree:
         jitter = spread if spread > 0 else 20.0
         return origin_x, origin_y, jitter
 
-    def resolve_and_fire_cast_graph(self, bullet, context) -> list:
-        """Bản thực thi trên Bullet object thật (Fire/Wind) — dùng
-        resolve_cast_graph()/resolve_trigger_firings() ở trên làm lõi tính toán."""
-        root_params, trigger_params, trigger_reference, order = self.resolve_cast_graph()
-
-        if (not order and not root_params.batches and root_params.damage_mult == 1.0
-                and root_params.speed_mult == 1.0 and root_params.size_mult == 1.0
-                and not root_params.orbit):
-            return []   # không rune nào tham gia đồ thị — bỏ qua
-
-        extra_bullets: list = []
-
-        bullet.damage *= root_params.damage_mult
-        bullet.vx     *= root_params.speed_mult
-        bullet.vy     *= root_params.speed_mult
-        bullet.radius *= root_params.size_mult
-
-        base_angle = math.atan2(bullet.vy, bullet.vx)
-        root_positions = self.resolve_batch_positions(bullet.x, bullet.y, base_angle, root_params.batches)
-        root_spawns = [bullet]
-        for x, y, jitter_deg in root_positions[1:]:   # [0] la ban goc (chinh bullet), khong tao them
-            copy = self._spawn_copy_at(bullet, x, y, base_angle, jitter_deg)
-            root_spawns.append(copy)
-            extra_bullets.append(copy)
-
-        # Self-Centered gắn vào Spell gốc → mọi bản của Spell quay quanh player.
-        if root_params.orbit:
-            for i, spawn in enumerate(root_spawns):
-                self._start_orbit(spawn, root_params, base_angle, i, len(root_spawns))
-
-        extra_bullets.extend(self.dispatch_trigger_firings(
-            bullet.x, bullet.y, bullet.vx, bullet.vy, bullet.damage,
-            root_params.spawn_count, trigger_params, trigger_reference, order,
-            context, source=bullet))
-
-        return extra_bullets
-
     def dispatch_trigger_firings(
         self,
         origin_x: float, origin_y: float,
@@ -264,7 +279,7 @@ class RuneTree:
     ) -> list:
         """Tính lịch bắn (resolve_trigger_firings) RỒI gọi trigger_once() cho
         MỌI lần kích hoạt — DÙNG CHUNG cho cả 4 hệ: Fire/Wind (có Bullet thật,
-        source=bullet) qua resolve_and_fire_cast_graph(), và Ice/Lightning
+        source=bullet) qua RuneTree.on_fire(), và Ice/Lightning
         (không có Bullet, source=None, tự tính origin/dir_x/dir_y thủ công từ
         vị trí spike/hướng ngắm) qua game_loop._release_ice_charge /
         _channel_lightning_attack. ĐÂY LÀ NƠI DUY NHẤT gọi trigger_once() với

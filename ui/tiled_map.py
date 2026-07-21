@@ -404,13 +404,11 @@ class TiledMap:
                     "sort_y": self.origin_y + (ty + 1) * self.tile_height,
                 })
             elif self.rock_sprites and roll < PROP_SPAWN_CHANCE + ROCK_SPAWN_CHANCE:
-                frames = self._choose_sprite(self.rock_sprites, tx, ty, "rock")
-                sprite = frames[0]
+                # Đá luôn có đúng 1 frame (xem self.rock_sprites) — không animation
+                # nên khỏi cần "frame_ms"/"phase", _draw_decorations tự dùng mặc định.
                 self.decorations.append({
                     "kind": "rock",
-                    "frames": frames,
-                    "frame_ms": 999999,
-                    "phase": 0,
+                    "frames": self._choose_sprite(self.rock_sprites, tx, ty, "rock"),
                     "x": self.origin_x + tx * self.tile_width,
                     "y": self.origin_y + ty * self.tile_height,
                     "sort_y": self.origin_y + (ty + 1) * self.tile_height,
@@ -429,19 +427,6 @@ class TiledMap:
                 "x": mon_x,
                 "y": mon_y,
                 "sort_y": self.origin_y + (island_cy + 2) * self.tile_height,
-            })
-
-            # NHÀ THỨ HAI: Lệch sang bên trái 8 ô gạch
-            mon_x2 = mon_x - 8 
-            mon_y2 = mon_y
-            self.decorations.append({
-                "kind": "monastery",
-                "frames": self.monastery_sprites,
-                "frame_ms": 999999,
-                "phase": 0,
-                "x": mon_x2,
-                "y": mon_y2,
-                "sort_y": mon_y2 + sprite.get_height(),
             })
 
 
@@ -592,7 +577,7 @@ class TiledMap:
                 rect_w = int(160 * 1.5)
                 rect_h = int(80 * 1.5)
                 rect_x = prop["x"] + int(192 * 1.5) / 2 - rect_w / 2
-                rect_bottom = prop["y"] + int(320 * 1.5) - 4
+                rect_bottom = prop["y"] + int(320 * 1.5) - 8
                 rect_y = rect_bottom - rect_h
             elif prop.get("kind") in ("bush", "water_rock"):
                 continue # Bụi cỏ và đá trong nước không cần va chạm riêng
@@ -865,7 +850,7 @@ class TiledMap:
                 continue
             if max_sort_y is not None and prop["sort_y"] > max_sort_y:
                 continue
-            frame = self._animation_frame(prop["frames"], prop["frame_ms"], prop["phase"])
+            frame = self._animation_frame(prop["frames"], prop.get("frame_ms", 1), prop.get("phase", 0))
             if prop["x"] > view_right or prop["x"] + frame.get_width() < view_left:
                 continue
             if prop["y"] > view_bottom or prop["y"] + frame.get_height() < view_top:

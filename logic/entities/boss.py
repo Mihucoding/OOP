@@ -10,21 +10,21 @@ class Boss(Enemy):
     3. Summon  : set cờ pending_summon=True → WaveManager spawn quái
     """
     RADIUS = 45
-    BASE_HP = 1000
+    BASE_HP = 5000
     BASE_SPEED = 50
     XP_VALUE = 500
 
     # Skill configs
-    CHARGE_COOLDOWN = 8.0
+    CHARGE_COOLDOWN = 4.0
     CHARGE_DURATION = 1.2
     CHARGE_SPEED = 350
 
-    AOE_COOLDOWN = 12.0
+    AOE_COOLDOWN = 8.0
     AOE_RADIUS = 120
     AOE_DAMAGE_PER_SEC = 40.0
     AOE_DURATION = 1.5
 
-    SUMMON_COOLDOWN = 15.0
+    SUMMON_COOLDOWN = 10.0
     SUMMON_COUNT = 4
 
     CHARGE_DAMAGE = 30.0

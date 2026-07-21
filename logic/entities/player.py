@@ -81,6 +81,7 @@ class Player:
         self.lightning_overload = 0.0
         self.lightning_overloaded = False
         self.noclip_mode = False
+        self.lives = 3
 
         # Chỉ số stats (nâng qua StatUpgrade)
         self.armor    = 0.0    # % giảm damage nhận (tối đa 75%)
@@ -226,8 +227,12 @@ class Player:
         if reduced > 0 and self.alive:
             self.hurt_timer = 0.35
         if self.hp <= 0:
-            self.hp    = 0
-            self.alive = False
+            self.hp = 0
+            if self.lives > 0:
+                self.hp = self.max_hp
+                self.lives -= 1 
+            else:
+                self.alive = False
 
     # ── XP ────────────────────────────────────────────────────────────────────
 

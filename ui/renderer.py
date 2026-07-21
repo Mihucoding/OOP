@@ -208,7 +208,7 @@ class Renderer:
         }
         for anim_name, filename in golem_sheets.items():
             path = os.path.join(tank_dir, filename)
-            frames = self._slice_golem_sheet(path, scale=1.0)
+            frames = self._slice_golem_sheet(path, scale=2.0)
             if frames:
                 self.tank_animations[anim_name] = frames
 
@@ -216,7 +216,7 @@ class Renderer:
         boss_dir = os.path.join(root_dir, "assets", "sprites", "Boss")
         for anim_name, filename in golem_sheets.items():
             path = os.path.join(boss_dir, filename)
-            frames = self._slice_golem_sheet(path, scale=2.5)
+            frames = self._slice_golem_sheet(path, scale=4.0)
             if frames:
                 self.boss_animations[anim_name] = frames
 
@@ -1278,17 +1278,20 @@ class Renderer:
     def _draw_mini_tornado(self, cx: float, cy: float, size: float, fade: float,
                            t_phase: float) -> None:
         """1 cây lốc nhỏ trong cụm Perfect Storm — chồng nhiều hình elip thu
-        nhỏ dần từ đáy (xanh đậm, rộng) lên đỉnh (xanh sáng, hẹp), mỗi lớp lắc
-        ngang lệch pha để trông như đang xoáy/lượn."""
+        nhỏ dần từ đỉnh (xanh đậm, rộng, phía trên) xuống mũi nhọn chạm đất
+        (xanh sáng, hẹp, tại `cy`) — lộn ngược so với bản cũ (trước đây mũi
+        nhọn lại ở trên) để đúng hình dạng phễu lốc xoáy thật: loe rộng phía
+        trên, thu nhọn chạm đất. Mỗi lớp lắc ngang lệch pha để trông như đang
+        xoáy/lượn."""
         if size < 2:
             return
         layers = 6
         for k in range(layers):
-            frac = k / (layers - 1)               # 0 = đáy, 1 = đỉnh
+            frac = k / (layers - 1)               # 0 = đỉnh loe rộng, 1 = mũi nhọn chạm đất
             lr = max(1, size * (1.0 - frac * 0.82))
             sway = math.sin(t_phase * 3.2 + frac * 3.0) * size * 0.22 * frac
             lx = cx + sway
-            ly = cy - frac * size * 1.35
+            ly = cy - (1.0 - frac) * size * 1.35
             col = (
                 int(40 + frac * 150),
                 int(110 + frac * 145),
@@ -1298,12 +1301,12 @@ class Renderer:
             layer_surf = pygame.Surface((int(lr * 2) + 2, int(lr * 0.9) + 2), pygame.SRCALPHA)
             pygame.draw.ellipse(layer_surf, (*col, max(0, alpha)), layer_surf.get_rect())
             self.screen.blit(layer_surf, layer_surf.get_rect(center=(lx, ly)))
-        # Điểm sáng ở đỉnh — tâm mắt lốc, nhấn tiêu điểm giống lốc thật.
-        top_y = cy - size * 1.35
+        # Điểm sáng ở mũi nhọn chạm đất — tâm mắt lốc, nhấn tiêu điểm giống lốc thật.
+        tip_y = cy
         core_r = max(1, int(size * 0.14))
         core = pygame.Surface((core_r * 2, core_r * 2), pygame.SRCALPHA)
         pygame.draw.circle(core, (225, 255, 220, int(fade * 210)), (core_r, core_r), core_r)
-        self.screen.blit(core, core.get_rect(center=(cx, top_y)))
+        self.screen.blit(core, core.get_rect(center=(cx, tip_y)))
 
     def _draw_ice_spiral_effect(self, effect: dict, frames: list[pygame.Surface], cam_x, cam_y) -> None:
         """Vòng băng xoáy (Ice + Twist of Fate) — bẻ cong dải sprite băng

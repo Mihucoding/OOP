@@ -17,7 +17,7 @@ class PerfectStormModifier(ModifierRune):
     Riêng khi đứng trong cây của Fire (đạn thật, đi qua rune_tree.on_fire()),
     nó CÓ tham gia cơ chế "cast graph" (IS_CAST_GRAPH_TRIGGER) — nếu có
     FreneticEnergyModifier gắn vào nó, số lần/số lượng cast sẽ nhân lên
-    tương ứng (xem RuneTree.resolve_and_fire_cast_graph).
+    tương ứng (xem RuneTree.on_fire).
     """
     IS_CAST_GRAPH_TRIGGER = True
     IS_TRIGGER     = True
@@ -37,7 +37,7 @@ class PerfectStormModifier(ModifierRune):
     # ── Đạn có quỹ đạo (Fire) — tham gia cast graph, xem RuneTree ────────────
 
     def on_fire(self, bullet, context: dict) -> list:
-        return []   # toàn bộ logic chạy qua resolve_and_fire_cast_graph
+        return []   # toàn bộ logic chạy qua RuneTree.on_fire (cast graph)
 
     def on_update(self, bullet, dt: float, context: dict = None) -> None:
         pass

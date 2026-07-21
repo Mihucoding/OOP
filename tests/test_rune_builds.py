@@ -560,7 +560,10 @@ class TestRollingStone(unittest.TestCase):
         self.assertEqual(boulder.LIFETIME, 5.0)
         self.assertNotEqual(boulder.LIFETIME, Bullet.LIFETIME)
 
-    def test_boulder_pierces_without_dying(self):
+    def test_boulder_falls_on_first_hit(self):
+        # Rolling Stone dừng lăn (rơi xuống) ngay khi trúng quái đầu tiên —
+        # không xuyên qua nhiều địch (game_loop._fall_rolling_stones biến nó
+        # thành 1 tảng đá tĩnh vĩnh viễn tại đây).
         from logic.rune.modifiers.rolling_stone_modifier import RollingStoneModifier
         rune = RollingStoneModifier()
         ctx = {'bullets': []}
@@ -568,7 +571,7 @@ class TestRollingStone(unittest.TestCase):
         e1, e2 = Enemy(0, 0), Enemy(10, 0)
         boulder.x, boulder.y = e1.x, e1.y
         boulder.on_hit(e1, {'enemies': [e1, e2], 'bullets': []})
-        self.assertTrue(boulder.alive)
+        self.assertFalse(boulder.alive)
 
     def test_does_not_repeat_on_update(self):
         # Khác Furious Outburst: Rolling Stone chỉ nổ lúc spawn, không lặp lại

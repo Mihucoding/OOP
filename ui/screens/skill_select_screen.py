@@ -14,6 +14,7 @@ handle_event trả về:
   • None còn lại
 """
 import math
+import os
 import pygame
 
 from ui import rune_ui_config as cfg
@@ -31,9 +32,18 @@ class SkillSelectScreen:
         self.screen     = screen
         self.font_big   = font_big
         self.font_small = font_small
+        self.font_desc  = self._load_font(15)   # nhỏ hơn font_small — mô tả xuống dòng vừa cột crystal
         self.selected: list[str] = []   # key theo thứ tự chọn, tối đa 2
         self._time      = 0.0
         self._crests: list[tuple] = []  # (key, center, radius)
+
+    def _load_font(self, size: int) -> pygame.font.Font:
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        font_path = os.path.join(root_dir, "assets", "fonts", "pixel_font.ttf")
+        try:
+            return pygame.font.Font(font_path, size)
+        except Exception:
+            return pygame.font.SysFont(None, size)
 
     def reset(self) -> None:
         self.selected = []
@@ -107,11 +117,15 @@ class SkillSelectScreen:
             num = self.font_small.render(str(idx), True, (20, 28, 40))
             self.screen.blit(num, num.get_rect(center=(bx, by)))
 
-        # Tên + mô tả
+        # Tên + mô tả (mô tả tự xuống dòng cho vừa bề rộng cột, tránh đè crystal kế bên)
         name = self.font_small.render(th["name"], True, color)
         self.screen.blit(name, name.get_rect(center=(center[0], center[1] + CREST_R + 26)))
-        desc = self.font_small.render(th["desc"], True, (170, 185, 205))
-        self.screen.blit(desc, desc.get_rect(center=(center[0], center[1] + CREST_R + 50)))
+        desc_lines = self._wrap_text(th["desc"], self.font_desc, GAP - 20)
+        line_h = self.font_desc.get_height() + 2
+        desc_y = center[1] + CREST_R + 50
+        for i, line in enumerate(desc_lines):
+            surf = self.font_desc.render(line, True, (170, 185, 205))
+            self.screen.blit(surf, surf.get_rect(center=(center[0], desc_y + i * line_h)))
 
     def _draw_confirm(self) -> None:
         ready = len(self.selected) == 2
@@ -135,6 +149,24 @@ class SkillSelectScreen:
 
     def _shade(self, color: tuple, scale: float) -> tuple:
         return tuple(max(0, min(255, int(c * scale))) for c in color)
+
+    def _wrap_text(self, text: str, font: pygame.font.Font, max_width: int) -> list:
+        """Cắt `text` thành nhiều dòng sao cho mỗi dòng render ra không quá
+        `max_width` px — pygame không tự word-wrap nên phải tự làm bằng tay,
+        gộp từng từ vào dòng hiện tại tới khi vượt bề rộng thì xuống dòng mới."""
+        words = text.split(" ")
+        lines = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if not current or font.size(candidate)[0] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines
 
     # ── Event ──────────────────────────────────────────────────────────────────
 

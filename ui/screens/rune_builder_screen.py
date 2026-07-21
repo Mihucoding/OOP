@@ -1,24 +1,48 @@
 r"""
-RuneBuilderScreen — Màn hình Rune Builder kiểu Mylistra.
+RuneBuilderScreen — Màn hình Rune Builder toàn màn hình, phong cách "Watcher's Heart".
 
 Layout (1280×720):
-┌───────────────┬──────────────────────────────────┐
-│  INVENTORY    │  [Chiêu 1] [Chiêu 2] [Chiêu 3]   │
-│  (300px)      │                                   │
-│               │          [Base Spell]             │
-│  [Rune 1]     │         /            \            │
-│  [Rune 2]     │      [L1]            [R1]         │
-│  [Rune 3]     │       |               |           │
-│  ...          │      [L2]            [R2]         │
-└───────────────┴──────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         WATCHER'S HEART                           │
+│                   ⬡ Spell 1    Q/E    ⬡ Spell 2                  │
+│ ┌───────────────┐         ╱  core  ╲        ┌──────────────────┐ │
+│ │ Ability panel │       L1            R1     │ Hover info panel │ │
+│ │ icon/mô tả/   │        |             |     │ (chỉ hiện khi rê │ │
+│ │ stats/attrs   │       L2            R2     │  chuột vào rune) │ │
+│ └───────────────┘                            └──────────────────┘ │
+│                 ──○─○─○─○─○──  (kho 5 slot modifier)              │
+│                       hints (Q/E · Tab đóng · ...)                │
+└──────────────────────────────────────────────────────────────────┘
+
+Thành phần chính (vẽ trong `draw()`, theo đúng thứ tự):
+  • `_draw_watcher_background`  — nền mờ (chụp lại khung game phía sau) + vòng
+                                   glow tâm theo màu hệ đang chọn
+  • `_draw_ability_panel`       — hồ sơ chiêu đang active: icon, tên, mô tả,
+                                   stats, và các attribute (Burn/Chill/Pierce...)
+  • `_draw_watcher_tree`        — cây rune node lục giác; layout node khác nhau
+                                   theo từng hệ (Fire/Ice/Wind/Lightning), morph
+                                   mượt khi đổi chiêu/hệ (`_layout_watcher_slots`)
+  • `_draw_top_spell_bar`       — tiêu đề + crystal chọn hệ cho từng chiêu (Q/E)
+  • `_draw_modifier_storage`    — kho 5 slot chứa Modifier rune chưa gắn vào cây
+  • `_draw_hover_info_panel`    — panel phải, chỉ hiện khi rê chuột vào 1 rune
+                                   (cây hoặc kho), kèm keyword sub-card (Critical,
+                                   Vortex, ...)
 
 Tương tác:
-  • Click rune trong inventory → chọn (highlight)
-  • Click slot trống hợp lệ   → đặt rune đã chọn vào slot
-  • Click slot có rune + đang chọn rune → swap (nếu compatible)
-  • Click slot có rune + không chọn     → lấy rune về inventory
-  • Click rune đang chọn lại            → bỏ chọn
-  • ESC / Tab / Enter                   → lưu và đóng
+  • Click orb trong kho             → chọn (highlight) 1 modifier
+  • Click slot trống hợp lệ         → đặt rune đã chọn vào slot
+  • Click slot có rune + đang chọn  → swap (nếu compatible)
+  • Click slot có rune, không chọn  → lấy rune về kho
+  • Kéo 1 node có rune sang node khác → đổi chỗ 2 node trong cây
+  • Chuột phải trên node            → gỡ thẳng rune về kho
+  • Q / E                           → đổi hệ (element) cho chiêu đang active
+  • ESC / Tab / Enter               → lưu và đóng
+
+Ghi chú: file còn vài method vẽ layout CŨ kiểu Mylistra (inventory panel bên
+trái + tab Inventory/Chỉ số: `_draw_inventory_panel`, `_draw_left_tabs`,
+`_draw_stats_panel`, `_draw_tree_canvas`, `_draw_slot`, `_draw_spell_buttons`,
+`_draw_header`, `_draw_combo_hint`...) — vẫn còn trong file nhưng `draw()`
+KHÔNG gọi tới nữa, chỉ luồng "Watcher" ở trên là đang chạy thật.
 """
 import math
 import os
@@ -67,6 +91,16 @@ class RuneBuilderScreen:
     """Màn hình Rune Builder toàn màn hình."""
 
     def __init__(self, screen: pygame.Surface, font_big, font_small):
+        """Khởi tạo state của màn hình Builder (chưa vẽ gì cả — vẽ thật nằm
+        trong `draw()`, được `GameLoop` gọi mỗi frame khi state là
+        STATE_RUNE_BUILDER).
+
+        Tham số:
+            screen: Surface chính để vẽ lên (do GameLoop truyền vào, dùng
+                chung với toàn bộ game).
+            font_big / font_small: 2 font pygame dùng cho toàn màn hình
+                (tiêu đề/tên rune dùng font_big, mô tả/nhãn dùng font_small).
+        """
         self.screen     = screen
         self.font_big   = font_big
         self.font_small = font_small
@@ -117,11 +151,47 @@ class RuneBuilderScreen:
         self._board_cache     = {}     # cache board đã render mịn theo (key, radius)
 
     def set_background_snapshot(self, surface: pygame.Surface) -> None:
+        """Lưu 1 bản chụp (copy) khung hình game NGAY TRƯỚC khi mở Builder —
+        dùng làm nền mờ phía sau (xem `_draw_watcher_background`), cho cảm
+        giác Builder "che" lên trên game thay vì màn hình đen trơn.
+
+        Tham số:
+            surface: Surface game lúc vừa nhấn phím mở Builder (GameLoop tự
+                chụp và gọi hàm này 1 lần trước khi chuyển state).
+
+        Gọi bởi: GameLoop (lúc chuyển sang STATE_RUNE_BUILDER).
+        """
         self.background_snapshot = surface.copy()
 
     # ── Vẽ ────────────────────────────────────────────────────────────────────
 
     def draw(self, player, dt: float = 0.0) -> None:
+        """Điểm vào (entry point) vẽ TOÀN BỘ màn hình Builder — GameLoop gọi
+        hàm này mỗi frame khi đang ở STATE_RUNE_BUILDER. Chỉ lo ĐIỀU PHỐI thứ
+        tự vẽ (thứ tự quyết định layer nào đè lên layer nào); từng phần cụ
+        thể giao hết cho các hàm `_draw_...` con.
+
+        Tham số:
+            player: đối tượng Player hiện tại — lấy chiêu đang active, cây
+                rune của từng chiêu, kho modifier (player.rune_inventory)...
+            dt: số giây trôi qua kể từ frame trước — dùng cho animation
+                (morph vị trí node, hiệu ứng nhấp nháy/pulse, đếm ngược
+                status_timer...).
+
+        Thứ tự gọi (SAU đè lên TRƯỚC):
+            _layout_watcher_slots   → tính vị trí node (không vẽ)
+            _draw_watcher_background → nền mờ + vòng glow
+            _draw_ability_panel      → panel trái (hồ sơ chiêu)
+            _draw_watcher_tree       → cây rune (node + link)
+            _draw_top_spell_bar      → tiêu đề + crystal chọn hệ (vẽ SAU cây
+                                        để không bị node đè lên)
+            _draw_modifier_storage   → kho 5 slot modifier (set self._hovered_rune
+                                        nếu chuột đang hover 1 orb có rune)
+            _draw_hover_info_panel   → panel phải, CHỈ vẽ nếu có hover
+            _draw_instructions       → hint phím tắt ở đáy màn hình
+            _draw_status             → thông báo tạm thời (VD "Đã đặt rune")
+            _draw_tree_drag_ghost    → hình rune mờ theo con trỏ khi đang kéo
+        """
         self._time += dt
         if self.status_timer > 0:
             self.status_timer -= dt
@@ -143,7 +213,24 @@ class RuneBuilderScreen:
             self._draw_tree_drag_ghost()
 
     def _layout_watcher_slots(self, player, dt: float = 0.0) -> None:
-        """Đặt vị trí node; morph mượt khi element/chiêu đổi layout."""
+        """Tính vị trí (x, y) THẬT của từng node trong cây — KHÔNG vẽ gì cả,
+        chỉ ghi thẳng vào `slot.x`/`slot.y` để mọi hàm vẽ sau đó dùng. Khi đổi
+        chiêu hoặc đổi hệ (element), layout node đổi hẳn (xem
+        `_tree_config_for_element`) — hàm này làm cho việc đổi đó "morph"
+        mượt (node trượt dần từ vị trí cũ sang vị trí mới trong `_anim_dur`
+        giây) thay vì nhảy cóc đột ngột.
+
+        Tham số:
+            player: lấy chiêu đang active (`player.get_active_spell()`) và
+                index của nó để biết layout có vừa đổi hay không.
+            dt: số giây trôi qua — cộng dồn vào `_anim_t` (tiến trình morph,
+                0.0 = vừa bắt đầu, 1.0 = đã ổn định).
+
+        Gọi tới: `_element_key`, `_tree_config_for_element`, `_theme_for_element`,
+            `_ease_out`, `_lerp_color`.
+        Gọi bởi: `draw()` (luôn là bước đầu tiên, trước mọi hàm vẽ khác vì
+            chúng đều đọc `slot.x`/`slot.y` đã được tính ở đây).
+        """
         spell = player.get_active_spell()
         key = self._element_key(spell)
         config = self._tree_config_for_element(key, cfg.BOARD_CENTER, cfg.BOARD_RADIUS)
@@ -178,6 +265,18 @@ class RuneBuilderScreen:
             slot.y = int(fy + (ty - fy) * e)
 
     def _draw_watcher_background(self, player) -> None:
+        """Vẽ nền: bản chụp game cũ làm mờ (blur bằng cách thu nhỏ rồi phóng
+        to lại) + 1 lớp tối phủ lên, cộng thêm vài vòng tròn đồng tâm mờ dần
+        (glow) quanh tâm board, tô theo màu hệ (element) đang active.
+
+        Tham số:
+            player: lấy chiêu đang active để biết tô glow màu gì
+                (`_theme_for_element` + `_anim_color` — màu đang morph, xem
+                `_layout_watcher_slots`).
+
+        Gọi tới: `_theme_for_element`, `_element_key`.
+        Gọi bởi: `draw()` (vẽ ngay sau khi tính layout, trước mọi UI khác).
+        """
         if self.background_snapshot is not None:
             small = pygame.transform.smoothscale(self.background_snapshot, (160, 90))
             blurred = pygame.transform.smoothscale(small, (SCREEN_W, SCREEN_H))
@@ -198,6 +297,21 @@ class RuneBuilderScreen:
             self.screen.blit(ring, (0, 0))
 
     def _draw_top_spell_bar(self, player) -> None:
+        """Vẽ tiêu đề "WATCHER'S HEART" + hàng crystal lục giác chọn hệ, mỗi
+        crystal ứng với 1 chiêu (`player.spells`) — bấm/đổi bằng Q/E ngoài
+        game (xử lý ở GameLoop, không phải ở đây). Đồng thời tự cập nhật
+        `self.spell_button_rects` (hitbox từng crystal) để `_handle_spell_button_click`
+        dùng khi xử lý click chuột.
+
+        Tham số:
+            player: danh sách `player.spells` (số crystal = số chiêu) và
+                `player.active_spell_index` (crystal nào đang "active" —
+                to hơn, sáng hơn, có glow nhấp nháy).
+
+        Gọi tới: `_element_key`, `_theme_for_element`, `_draw_selector_crystal`,
+            `_draw_swap_hint` (chỉ khi đúng 2 chiêu — gợi ý phím Q/E đổi hệ).
+        Gọi bởi: `draw()` (vẽ SAU cây rune để crystal không bị node đè lên).
+        """
         title = self.font_big.render("WATCHER'S HEART", True, (238, 246, 244))
         self.screen.blit(title, title.get_rect(center=(cfg.BOARD_CENTER[0], 26)))
 
@@ -222,6 +336,19 @@ class RuneBuilderScreen:
             self._draw_swap_hint((cx, y - 52))
 
     def _draw_selector_crystal(self, center, color, key, active: bool) -> None:
+        """Vẽ 1 viên crystal lục giác trong hàng chọn hệ (1 viên = 1 chiêu).
+
+        Tham số:
+            center: (x, y) tâm crystal trên màn hình.
+            color: màu hệ (RGB) — lấy từ `_theme_for_element`.
+            key: chuỗi hệ ("fire"/"ice"/"lightning"/"wind") — dùng để lấy
+                icon/glyph đúng hệ.
+            active: True nếu đây là chiêu đang được chọn (vẽ to hơn, viền
+                dày hơn, có glow nhấp nháy theo `self._time`).
+
+        Gọi tới: `_hex_points`, `_shade_color`, `_element_icon`, `_theme_for_element`.
+        Gọi bởi: `_draw_top_spell_bar` (1 lần cho mỗi chiêu trong `player.spells`).
+        """
         r = 36 if active else 27
         pts = self._hex_points(center[0], center[1], r)
         if active:
@@ -246,6 +373,15 @@ class RuneBuilderScreen:
             self.screen.blit(g, g.get_rect(center=center))
 
     def _draw_swap_hint(self, center) -> None:
+        """Vẽ mũi tên cong nhỏ + badge chữ "Q / E" phía trên hàng crystal —
+        gợi ý người chơi có thể bấm Q/E để đổi hệ cho chiêu đang active.
+
+        Tham số:
+            center: (x, y) tâm cụm gợi ý (đặt phía trên 2 crystal).
+
+        Gọi bởi: `_draw_top_spell_bar` (chỉ khi đúng 2 chiêu — layout 3+
+            chiêu chưa có chỗ đặt gợi ý này).
+        """
         # Mũi tên xoay đổi hệ + badge phím Q/E
         col = (210, 226, 236)
         cxp, cyp = center
@@ -257,6 +393,20 @@ class RuneBuilderScreen:
         self.screen.blit(badge, badge.get_rect(center=(cxp, cyp + 16)))
 
     def _draw_ability_panel(self, player) -> None:
+        """Vẽ panel viền neon bên trái — "hồ sơ" của chiêu đang active: icon
+        lớn + tên hệ, mô tả ngắn, danh sách stat (Damage/Duration/...), và
+        các ô "attribute" bên dưới (VD "Burn: Deals stacking damage...").
+        Toàn bộ nội dung lấy từ `_spell_profile` — hàm này chỉ lo LAYOUT/VẼ,
+        không tự tính số liệu.
+
+        Tham số:
+            player: truyền tiếp cho `_spell_profile` để tính profile của
+                chiêu đang active (`player.get_active_spell()`).
+
+        Gọi tới: `_spell_profile`, `_draw_neon_panel`, `_element_icon`,
+            `_draw_rune_crest`, `_wrap_text`.
+        Gọi bởi: `draw()`.
+        """
         spell = player.get_active_spell()
         profile = self._spell_profile(player, spell)
         x, y, w, h = 42, 112, 465, 455
@@ -298,7 +448,22 @@ class RuneBuilderScreen:
             attr_y += 68
 
     def _draw_hover_info_panel(self, rune) -> None:
-        """Panel bên phải — giải thích rune đang được trỏ chuột vào (cây hoặc kho)."""
+        """Panel bên phải — giải thích rune đang được trỏ chuột vào (trong
+        cây hoặc trong kho). CHỈ được `draw()` gọi khi có hover (kiểm tra
+        `self._hovered_rune is not None` — biến này do `_draw_watcher_tree`
+        hoặc `_draw_modifier_storage` set trong CÙNG frame, trước khi hàm
+        này chạy). Chiều cao panel tự tính động theo độ dài mô tả (khỏi dư
+        khoảng trắng cho rune mô tả ngắn).
+
+        Tham số:
+            rune: đối tượng RuneComponent (Element/Modifier/Trigger) đang
+                được hover — lấy tên/mô tả/màu/loại trực tiếp từ chính nó
+                (`get_display_name`, `get_description`, `get_rune_kind`...).
+
+        Gọi tới: `_rune_ui_color`, `_wrap_text`, `_draw_neon_panel`,
+            `_draw_keyword_cards`.
+        Gọi bởi: `draw()` (chỉ khi `self._hovered_rune` khác None).
+        """
         from logic.rune.rune_component import ModifierRune
         from ui.rune_ui_config import keywords_in_text
 
@@ -381,7 +546,22 @@ class RuneBuilderScreen:
                                  rect.bottom + 12, x, w)
 
     def _draw_keyword_cards(self, keywords, top_y: int, x: int, w: int) -> None:
-        """Vẽ các thẻ phụ giải nghĩa từ khoá (VD 'Critical') dưới panel rune."""
+        """Vẽ các thẻ phụ (sub-card) giải nghĩa từ khoá xuất hiện trong mô tả
+        rune (VD chữ "Critical" trong mô tả Flash of Swords) — xếp DỌC ngay
+        dưới panel hover chính, thẻ nọ nối tiếp thẻ kia (không đè lên nhau).
+
+        Tham số:
+            keywords: list các cặp (tên_từ_khoá, định_nghĩa) — lấy sẵn từ
+                `rune_ui_config.keywords_in_text()` (so khớp chữ trong mô tả
+                với bảng KEYWORD_INFO khai báo ở `ui/rune_ui_config.py`).
+            top_y: toạ độ y bắt đầu vẽ thẻ đầu tiên (thường = đáy panel hover
+                chính + khoảng cách).
+            x, w: vị trí/độ rộng panel — dùng chung với panel hover chính để
+                thẳng hàng.
+
+        Gọi tới: `_wrap_text`, `_draw_neon_panel`.
+        Gọi bởi: `_draw_hover_info_panel` (luôn là bước cuối, vẽ dưới cùng).
+        """
         teal = (90, 235, 210)
         fh   = self.font_small.get_height()
         y    = top_y
@@ -400,7 +580,22 @@ class RuneBuilderScreen:
             y = rect.bottom + 10
 
     def _draw_modifier_storage(self, player) -> None:
-        """Kho modifier dạng thanh ─○─○─○─○─○─ (5 slot). Bật cheat → cuộn xem hết."""
+        """Kho modifier dạng thanh ngang ─○─○─○─○─○─ (5 orb), đặt ngay trên
+        cây rune. Chỉ chứa ModifierRune (element/trigger đã gắn thẳng vào cây
+        lúc chọn hệ, không nằm trong kho này). Bình thường CHỈ hiện đúng 5
+        slot (dư thì không thấy — game thật giới hạn 5 modifier tồn kho);
+        bật `player.cheat_mode` mới cho cuộn ngang để xem hết khi test nhiều
+        rune cùng lúc. Cũng set `self.inventory_rects` (hitbox từng orb, để
+        `_handle_inventory_click` dò click) và `self._hovered_rune` (nếu
+        đang hover 1 orb có rune).
+
+        Tham số:
+            player: đọc `player.rune_inventory` (list mọi rune đang có, lọc
+                lấy ModifierRune) và `player.cheat_mode`.
+
+        Gọi tới: `_draw_storage_orb`, `_draw_empty_orb`.
+        Gọi bởi: `draw()`.
+        """
         from logic.rune.rune_component import ModifierRune
 
         self.inventory_rects = []
@@ -476,6 +671,14 @@ class RuneBuilderScreen:
         self.screen.blit(tag, tag.get_rect(midleft=(view_left + view_w + 10, y0)))
 
     def _scroll_to_mouse(self, mouse_x: int) -> None:
+        """Kéo thanh cuộn kho (chế độ cheat) tới đúng vị trí chuột — đổi
+        `self.storage_scroll` (px) theo tỉ lệ vị trí chuột trên track.
+
+        Tham số:
+            mouse_x: toạ độ x hiện tại của chuột trên màn hình.
+
+        Gọi bởi: `handle_event` (khi đang kéo thanh cuộn — `storage_dragging`).
+        """
         if not self._storage_geom:
             return
         view_left, view_w, content_w, max_scroll = self._storage_geom
@@ -485,6 +688,21 @@ class RuneBuilderScreen:
         self.storage_scroll = max(0.0, min(max_scroll, rel * max_scroll))
 
     def _draw_storage_orb(self, orb_cx, orb_cy, ORB_R, rune, inv_idx) -> None:
+        """Vẽ 1 orb tròn trong kho — CÓ rune (khác với `_draw_empty_orb`).
+
+        Tham số:
+            orb_cx, orb_cy: tâm orb trên màn hình.
+            ORB_R: bán kính orb (px).
+            rune: rune đang chứa trong slot kho này — quyết định màu/icon.
+            inv_idx: index của rune trong `player.rune_inventory` — lưu vào
+                `self.inventory_rects` để khi click, biết chính xác đang
+                click rune nào trong kho (không phải index hiển thị, vì kho
+                cheat có thể cuộn/lọc khác thứ tự thật).
+
+        Gọi tới: `_rune_ui_color`, `_modifier_icon`, `_rune_glyph`, `_draw_hover_ring`.
+        Gọi bởi: `_draw_modifier_storage` (1 lần cho mỗi rune đang có trong
+            5 slot hiển thị).
+        """
         color    = self._rune_ui_color(rune)
         selected = (inv_idx == self.selected_inv_idx)
         r, g, b  = color
@@ -512,6 +730,18 @@ class RuneBuilderScreen:
             self._hovered_rune = rune
 
     def _draw_empty_orb(self, orb_cx, orb_cy, ORB_R) -> None:
+        """Vẽ 1 orb kho TRỐNG (chưa có rune) — vòng tròn mờ với 1 dấu chấm
+        giữa; sáng lên khi hover để báo "có thể thả rune vào đây" (dù thực
+        ra kho không nhận thả trực tiếp từ cây — chỉ mang tính báo hiệu).
+
+        Tham số:
+            orb_cx, orb_cy: tâm orb trên màn hình.
+            ORB_R: bán kính orb (px).
+
+        Gọi tới: `_draw_hover_ring`.
+        Gọi bởi: `_draw_modifier_storage` (cho các slot còn trống trong 5 ô
+            hiển thị, chỉ ở chế độ không-cheat).
+        """
         mx, my = self._mouse_pos
         hovering = math.hypot(mx - orb_cx, my - orb_cy) <= ORB_R
         if hovering:
@@ -526,6 +756,21 @@ class RuneBuilderScreen:
             self.screen.blit(dot_s, dot_s.get_rect(center=(orb_cx, orb_cy)))
 
     def _draw_watcher_tree(self, player) -> None:
+        """Vẽ toàn bộ cây rune của chiêu đang active: khung board lục giác,
+        đường nối giữa các node, chấm năng lượng chạy dọc link đang active,
+        các node trang trí (không phải slot thật, chỉ cho đẹp), và cuối cùng
+        là từng slot node thật (lõi + 4 nhánh modifier).
+
+        Tham số:
+            player: lấy chiêu đang active (`player.get_active_spell()`) —
+                từ đó suy ra `rune_slots` (cây rune thật để vẽ) và `key`
+                (hệ hiện tại, quyết định layout board qua `_tree_config_for_element`).
+
+        Gọi tới: `_element_key`, `_theme_for_element`, `_tree_config_for_element`,
+            `_draw_hex_board`, `_ease_out`, `_draw_tree_links`, `_draw_energy_flow`,
+            `_aa_dot`, `_shade_color`, `_draw_watcher_slot`.
+        Gọi bởi: `draw()`.
+        """
         spell = player.get_active_spell()
         rune_slots = spell.rune_slots
         key = self._element_key(spell)
@@ -555,6 +800,27 @@ class RuneBuilderScreen:
             self._draw_watcher_slot(slot, rune_slots, col, compact_dots=config.get("compact_dots", False))
 
     def _draw_watcher_slot(self, slot, rune_slots, theme_color, compact_dots: bool = False) -> None:
+        """Vẽ 1 node/slot trong cây — có 4 trạng thái khác nhau, hàm tự chọn
+        vẽ kiểu nào: (1) có rune thật, (2) đang là "nguồn kéo" (rune tạm ẩn
+        vì đang bị kéo đi chỗ khác — xem `_draw_tree_drag_ghost`), (3) trống
+        nhưng ĐANG CÓ THỂ thả rune đang cầm vào (chấm sáng + dấu "+"), (4)
+        trống bình thường (chấm mờ, sáng hơn 1 chút khi hover).
+
+        Tham số:
+            slot: 1 RuneSlot trong cây (có `.id`, `.x`/`.y` đã tính sẵn từ
+                `_layout_watcher_slots`, `.rune` hiện đang gắn nếu có).
+            rune_slots: toàn bộ RuneSlots của chiêu — dùng để hỏi
+                `is_active()`/`can_place()`.
+            theme_color: màu nền của hệ hiện tại (dùng khi slot trống, chưa
+                có rune riêng để lấy màu).
+            compact_dots: True khi board hệ Fire (5 nhánh, chật hơn) — thu
+                nhỏ khoảng cách/kích thước chấm ngân sách điểm cho vừa.
+
+        Gọi tới: `_rune_ui_color`, `_element_icon`, `_modifier_icon`,
+            `_draw_rune_crest`, `_rune_glyph`, `_draw_point_budget_pips`,
+            `_draw_hover_ring`, `_aa_dot`, `_shade_color`.
+        Gọi bởi: `_draw_watcher_tree` (1 lần cho mỗi slot trong cây).
+        """
         active = rune_slots.is_active(slot.id)
         # Node nguồn đang bị kéo đi chỗ khác → hiển thị như trống (rune thật
         # theo con trỏ, xem _draw_tree_drag_ghost), dù model chưa đổi gì cả
@@ -603,7 +869,19 @@ class RuneBuilderScreen:
 
     def _draw_tree_drag_ghost(self) -> None:
         """Vẽ rune đang được kéo bám theo con trỏ chuột — cùng kiểu crest với
-        node trong cây, hơi trong suốt để phân biệt với rune thật."""
+        node trong cây, hơi trong suốt (alpha 190/255) để phân biệt với rune
+        thật. Vẽ lên 1 Surface tạm rồi mới blit đè lên `self.screen` — cách
+        duy nhất để chỉnh alpha cho CẢ CỤM hình (icon + viền + chữ) cùng lúc,
+        vì `_draw_rune_crest` tự vẽ nhiều lớp không có tham số alpha riêng.
+
+        Không có tham số ngoài `self` — đọc thẳng `self.tree_drag_rune` (rune
+        đang kéo) và `self._mouse_pos` (vị trí bám theo).
+
+        Gọi tới: `_rune_ui_color`, `_element_icon`, `_modifier_icon`,
+            `_rune_glyph`, `_draw_rune_crest`.
+        Gọi bởi: `draw()` (chỉ khi `self.tree_dragging` True và có rune đang
+            kéo — luôn vẽ SAU CÙNG để ghost nổi trên mọi thứ khác).
+        """
         rune = self.tree_drag_rune
         mx, my = self._mouse_pos
         color = self._rune_ui_color(rune)
@@ -617,8 +895,23 @@ class RuneBuilderScreen:
         self.screen.blit(ghost, (0, 0))
 
     def _draw_point_budget_pips(self, slot, color, rune_slots, compact_dots: bool) -> None:
-        """5 chấm dưới lõi hệ chính = ngân sách điểm modifier đã dùng/tối đa.
-        Đặt thêm 1 modifier → thêm 1 chấm sáng (không còn là pip trang trí)."""
+        """5 chấm nhỏ dưới node lõi (hệ chính) = thanh hiển thị ngân sách
+        điểm modifier đã dùng/tối đa (`RuneSlots.MAX_POINTS`) — chấm đầy màu
+        hệ = đã "trả" 1 điểm, chấm rỗng = còn trống. Đặt thêm modifier tốn
+        điểm (`ModifierRune.POINT_COST`) thì thêm chấm sáng, KHÔNG phải 1
+        chấm = 1 modifier (modifier đắt có thể ăn nhiều chấm cùng lúc).
+
+        Tham số:
+            slot: node lõi (id == 0) — lấy `.x`/`.y` làm tâm để đặt hàng chấm
+                ngay bên dưới.
+            color: màu hệ hiện tại — tô cho chấm ĐÃ dùng.
+            rune_slots: hỏi `used_points()`/`MAX_POINTS` để biết vẽ bao
+                nhiêu chấm đầy/rỗng.
+            compact_dots: True → thu nhỏ khoảng cách + bán kính chấm (hệ Fire
+                có board chật hơn các hệ khác).
+
+        Gọi bởi: `_draw_watcher_slot` (chỉ gọi cho node lõi, `slot.id == 0`).
+        """
         used    = rune_slots.used_points()
         max_pts = rune_slots.MAX_POINTS
         dot_gap = 15 if compact_dots else 18
@@ -636,6 +929,27 @@ class RuneBuilderScreen:
 
     def _draw_hex_board(self, config: dict, theme: dict, color=None,
                         key: str = "basic", animating: bool = False) -> None:
+        """Vẽ khung nền lục giác phía sau cây rune (viền glow + lưới tam
+        giác mờ bên trong). Ảnh board khá nặng để vẽ mịn (nhiều lớp glow +
+        lưới), nên hàm này CACHE lại theo `(key, radius)` trong
+        `self._board_cache` — chỉ render lại thật sự khi đổi hệ/bán kính
+        hoặc đang animate (màu đang morph, cache cũ sai màu nên phải vẽ tươi
+        mỗi frame, chấp nhận rẻ hơn 1 chút — supersample ×2 thay vì ×3).
+
+        Tham số:
+            config: dict layout của hệ hiện tại (từ `_tree_config_for_element`)
+                — lấy `center`/`radius` để biết vẽ board to/nhỏ ở đâu.
+            theme: theme màu của hệ (dùng làm màu fallback nếu không truyền `color`).
+            color: màu thật sự dùng để tô (thường là `self._anim_color` —
+                màu đang morph khi vừa đổi hệ, mượt hơn dùng thẳng theme).
+            key: chuỗi hệ — CHỈ dùng làm khoá cache, không ảnh hưởng hình vẽ.
+            animating: True khi màu/layout đang trong quá trình morph — báo
+                hàm KHÔNG dùng cache (vẽ tươi mỗi frame theo màu hiện tại).
+
+        Gọi tới: `_render_board_surface`.
+        Gọi bởi: `_draw_watcher_tree` (vẽ board TRƯỚC, làm nền cho mọi thứ
+            khác trong cây).
+        """
         color = color or theme["color"]
         cx, cy = config["center"]
         radius = config["radius"]
@@ -655,7 +969,26 @@ class RuneBuilderScreen:
         self.screen.blit(surf, (lx, ly))
 
     def _render_board_surface(self, radius: int, margin: int, color, ss: int = 3) -> pygame.Surface:
-        """Render board ở phân giải ×ss rồi smoothscale xuống → cạnh mịn (anti-alias)."""
+        """Vẽ board lục giác THẬT (glow ngoài + nền mờ + lưới tam giác/kim
+        cương bên trong + viền mảnh) ở độ phân giải gấp `ss` lần kích thước
+        cuối, rồi thu nhỏ lại bằng `smoothscale` — thủ thuật supersampling để
+        cạnh/đường nét mịn hơn vẽ thẳng ở kích thước thật (pygame.draw không
+        tự anti-alias polygon).
+
+        Tham số:
+            radius: bán kính board (px, ở kích thước THẬT, chưa nhân ss).
+            margin: khoảng đệm quanh board (chừa chỗ cho glow lan ra ngoài
+                cạnh lục giác).
+            color: màu chủ đạo của board (viền + glow + tô theo màu hệ).
+            ss: hệ số supersample (2 khi đang animate cho rẻ, 3 khi đứng yên
+                để cache — xem `_draw_hex_board`).
+
+        Trả về: 1 Surface đã vẽ xong (kích thước thật = `radius*2 + margin*2`),
+            sẵn sàng để `blit` thẳng, không cần xử lý gì thêm.
+
+        Gọi tới: `_shade_color`, `_grid_supersampled`.
+        Gọi bởi: `_draw_hex_board`.
+        """
         size = radius * 2 + margin * 2
         W = size * ss
         surf = pygame.Surface((W, W), pygame.SRCALPHA)
@@ -697,7 +1030,24 @@ class RuneBuilderScreen:
         return pygame.transform.smoothscale(surf, (size, size))
 
     def _grid_supersampled(self, surf: pygame.Surface, center, R, color, ss: int) -> None:
-        """Lưới tam giác đều (3 hướng) + kim cương, vẽ ở phân giải cao để smooth."""
+        """Vẽ lưới trang trí bên trong board: các đường thẳng song song theo
+        3 hướng (0°/60°/120°, tạo hiệu ứng lưới tam giác đều) + các chấm kim
+        cương nhỏ tại giao điểm lưới — chỉ để đẹp, KHÔNG liên quan gì tới
+        slot/node thật của cây rune.
+
+        Tham số:
+            surf: Surface (đã ở độ phân giải ×ss) để vẽ lưới lên — hàm này
+                vẽ trực tiếp lên `surf`, không trả về gì.
+            center: (x, y) tâm lưới (đã nhân sẵn hệ số ss).
+            R: bán kính vùng phủ lưới (đã nhân sẵn hệ số ss).
+            color: màu chủ đạo — lưới/chấm dùng bản tối hơn của màu này
+                (`_shade_color`).
+            ss: hệ số supersample hiện tại — CHỈ dùng để tính độ dày nét vẽ
+                (line width) cho khớp tỉ lệ với phần còn lại của board.
+
+        Gọi tới: `_shade_color`.
+        Gọi bởi: `_render_board_surface`.
+        """
         cx, cy = center
         line_col = (*self._shade_color(color, 0.5), 40)
         node_col = (*self._shade_color(color, 0.9), 78)
@@ -726,7 +1076,23 @@ class RuneBuilderScreen:
                                         [(px, py - r), (px + r, py), (px, py + r), (px - r, py)])
 
     def _aa_dot(self, x, y, r, color, glow: bool = True, glow_alpha: int = 70) -> None:
-        """Chấm tròn bo mịn (anti-alias) + quầng sáng mềm — dùng cho node."""
+        """Vẽ 1 chấm tròn khử răng cưa (dùng `gfxdraw` thay vì `pygame.draw`
+        thường — mịn hơn hẳn ở bán kính nhỏ), kèm quầng sáng mềm bao quanh
+        nếu `glow=True`. Đây là "viên gạch" cơ bản để vẽ node trang trí và
+        node modifier trống trong cây (xem `_draw_watcher_slot`,
+        `_draw_watcher_tree`) — không tự biết gì về rune/slot cả.
+
+        Tham số:
+            x, y: tâm chấm trên màn hình.
+            r: bán kính chấm (px).
+            color: màu chấm (RGB).
+            glow: có vẽ thêm quầng sáng mờ lan ra ngoài hay không.
+            glow_alpha: độ đậm quầng sáng (0-255) — chỉ có ý nghĩa khi
+                `glow=True`.
+
+        Gọi bởi: `_draw_watcher_tree` (node trang trí), `_draw_watcher_slot`
+            (node modifier trống, có/không thể thả rune).
+        """
         xi, yi, ri = int(x), int(y), max(1, int(r))
         if glow:
             gr = ri * 3
@@ -741,7 +1107,19 @@ class RuneBuilderScreen:
         gfxdraw.aacircle(self.screen, xi, yi, ri, color)
 
     def _draw_hover_ring(self, cx: float, cy: float, radius: int) -> None:
-        """Viền trắng phát sáng quanh 1 node đang được trỏ chuột vào (feedback hover)."""
+        """Vẽ viền trắng phát sáng, nhấp nháy nhẹ theo `self._time`, quanh 1
+        node/orb đang được chuột trỏ vào — phản hồi hover DÙNG CHUNG cho cả
+        node trong cây lẫn orb trong kho modifier (2 hệ toạ độ khác nhau
+        nhưng cùng 1 kiểu vẽ).
+
+        Tham số:
+            cx, cy: tâm vòng tròn cần highlight.
+            radius: bán kính GỐC của node/orb — vòng hover vẽ lớn hơn 1 chút
+                (`radius + 6`) để bao ngoài, không đè lên icon bên trong.
+
+        Gọi bởi: `_draw_storage_orb`, `_draw_empty_orb`, `_draw_watcher_slot`
+            (mỗi nơi tự kiểm tra khoảng cách chuột-tâm rồi mới gọi).
+        """
         pulse = 0.5 + 0.5 * math.sin(self._time * 6.0)
         alpha = int(130 + 90 * pulse)
         gr = radius + 14
@@ -751,7 +1129,23 @@ class RuneBuilderScreen:
         self.screen.blit(glow, (int(cx) - gr, int(cy) - gr))
 
     def _arrow_points(self, start, end, size, t: float = 0.6):
-        """3 điểm tam giác mũi tên hướng start→end (hoặc None nếu quá ngắn)."""
+        """Tính 3 đỉnh tam giác (mũi tên) hướng từ `start` sang `end`, đặt ở
+        vị trí `t` dọc theo đoạn nối (mặc định 60% quãng đường) — dùng để vẽ
+        mũi tên chỉ hướng cha→con trên đường nối giữa 2 node trong cây.
+        HÀM THUẦN TÍNH TOÁN, không tự vẽ gì (người gọi tự `pygame.draw.polygon`
+        với kết quả trả về).
+
+        Tham số:
+            start, end: (x, y) 2 đầu đoạn thẳng — mũi tên chỉ từ start → end.
+            size: kích thước tam giác (px).
+            t: vị trí đặt mũi tên dọc đoạn thẳng, 0.0 = tại `start`, 1.0 =
+                tại `end`.
+
+        Trả về: list 3 điểm (tip, 2 góc đáy) để vẽ polygon, hoặc None nếu
+            đoạn thẳng quá ngắn (< 1px, không đủ để tính hướng).
+
+        Gọi bởi: `_draw_tree_links` (vẽ mũi tên trên từng cạnh cây).
+        """
         dx, dy = end[0] - start[0], end[1] - start[1]
         dist = math.hypot(dx, dy)
         if dist < 1:
@@ -766,7 +1160,29 @@ class RuneBuilderScreen:
                 (back[0] - px * size * 0.55, back[1] - py * size * 0.55)]
 
     def _draw_tree_links(self, rune_slots, config, col, theme, e: float) -> None:
-        """Vẽ accent + đường nối đôi + mũi tên ở phân giải ×2 rồi smoothscale → mịn."""
+        """Vẽ MỌI đường nối trong cây, gồm 3 loại: (1) "accent" — vệt sáng mờ
+        trang trí đã định nghĩa sẵn trong config, mờ dần theo tiến trình
+        morph `e`; (2) link thật giữa 2 slot liền kề — vẽ kiểu "đường đôi"
+        (viền sáng + rãnh tối ở giữa) và có mũi tên chỉ VỀ PHÍA CORE nếu cả
+        2 đầu đều active, mờ hơn nếu chưa; (3) đường nối "tự nối" — khi 1
+        slot có rune nhưng cha TRỰC TIẾP lại trống, vẽ nét đứt thẳng tới tổ
+        tiên gần nhất có rune (`rune_slots.effective_parent`) để không tạo
+        cảm giác node bị "rơi" khỏi cây. Cũng vẽ ở phân giải ×2 rồi
+        smoothscale xuống cho mịn, giống `_render_board_surface`.
+
+        Tham số:
+            rune_slots: cây rune thật của chiêu đang active — hỏi
+                `is_active()`/`effective_parent()` cho từng cạnh.
+            config: dict layout hệ hiện tại — lấy `accent_edges`/`edges`
+                (danh sách cặp id node cần nối).
+            col: màu chính (đường link active + mũi tên).
+            theme: theme hệ hiện tại — lấy `theme["accent"]` cho lớp accent.
+            e: tiến trình morph đã ease (0.0-1.0) — điều khiển độ mờ lớp accent.
+
+        Gọi tới: `_arrow_points`, `_shade_color`, `_dashed_line_surf`.
+        Gọi bởi: `_draw_watcher_tree` (vẽ SAU board, TRƯỚC node — để link nằm
+            dưới node, không đè lên icon).
+        """
         cx, cy = cfg.BOARD_CENTER
         radius = cfg.BOARD_RADIUS
         margin = 48
@@ -826,6 +1242,23 @@ class RuneBuilderScreen:
         self.screen.blit(scaled, (lx, ly))
 
     def _dashed_line_surf(self, surf, start, end, color, width, dash=10, gap=7) -> None:
+        """Vẽ 1 đường NÉT ĐỨT (dash-gap-dash-gap...) từ `start` tới `end`
+        lên `surf` — pygame không có sẵn hàm vẽ nét đứt nên phải tự chia
+        đoạn thẳng thành nhiều đoạn ngắn rồi vẽ xen kẽ.
+
+        Tham số:
+            surf: Surface đích để vẽ lên (không phải lúc nào cũng là
+                `self.screen` — VD `_draw_tree_links` vẽ lên surface tạm ở
+                độ phân giải cao trước khi smoothscale).
+            start, end: 2 đầu đoạn thẳng.
+            color: màu nét đứt.
+            width: độ dày nét (px).
+            dash: độ dài mỗi đoạn nét (px).
+            gap: độ dài mỗi khoảng hở giữa 2 đoạn nét (px).
+
+        Gọi bởi: `_draw_tree_links` (vẽ đường "tự nối" tới tổ tiên gần nhất
+            có rune).
+        """
         dx, dy = end[0] - start[0], end[1] - start[1]
         dist = math.hypot(dx, dy)
         if dist == 0:
@@ -846,6 +1279,22 @@ class RuneBuilderScreen:
         fill=(9, 15, 33, 225),
         border_alpha=150,
     ) -> None:
+        """Vẽ 1 khung panel chữ nhật kiểu "neon": nền tối trong mờ + bóng đổ
+        đen lệch xuống-phải + viền màu đậm sát mép + 1 viền mờ hơn nới rộng
+        ra ngoài (tạo cảm giác phát sáng nhẹ). Đây là khung DÙNG CHUNG cho
+        MỌI panel chữ nhật trong Builder (ability panel, hover info panel,
+        keyword card, attribute box...) — đổi 1 chỗ ở đây là đổi hết.
+
+        Tham số:
+            rect: vùng chữ nhật của panel (vị trí + kích thước).
+            color: màu viền chính (thường là màu hệ hoặc màu rune).
+            fill: màu nền (RGBA) — mặc định tối gần đen, hơi trong suốt để
+                vẫn thấy mờ mờ nền phía sau.
+            border_alpha: độ đậm viền ngoài (viền mờ nới rộng thêm 10px).
+
+        Gọi bởi: `_draw_ability_panel`, `_draw_hover_info_panel`,
+            `_draw_keyword_cards` (mọi nơi cần khung panel).
+        """
         surf = pygame.Surface(rect.size, pygame.SRCALPHA)
         surf.fill(fill)
         self.screen.blit(surf, rect.topleft)
@@ -855,6 +1304,26 @@ class RuneBuilderScreen:
 
     def _draw_rune_crest(self, center: tuple[int, int], color: tuple, glyph: str,
                          large: bool = False, icon=None) -> None:
+        """Vẽ "huy hiệu" lục giác cho 1 rune — dùng chung cho node lõi (to),
+        node modifier trong cây (nhỏ), và cả rune ghost đang kéo. Có hiệu
+        ứng "thở" (glow phồng-xẹp nhẹ theo `self._time`) cho cảm giác neon
+        sống động thay vì tĩnh.
+
+        Tham số:
+            center: (x, y) tâm huy hiệu.
+            color: màu chủ đạo (viền + nền + glow).
+            glyph: 1 ký tự chữ cái dùng làm biểu tượng NẾU không có icon
+                sprite riêng (VD "F" cho Fire).
+            large: True → vẽ to (node lõi, bán kính 58px); False → nhỏ
+                (node modifier/orb kho, bán kính 30px).
+            icon: sprite ảnh (nếu rune có icon vẽ tay riêng — xem
+                `_element_icon`/`_modifier_icon`); None thì fallback vẽ chữ
+                `glyph`.
+
+        Gọi tới: `_hex_points`, `_shade_color`.
+        Gọi bởi: `_draw_ability_panel` (icon lớn đầu panel), `_draw_watcher_slot`
+            (node có rune), `_draw_tree_drag_ghost` (rune đang kéo).
+        """
         radius = 58 if large else 30   # modifier nhỏ hơn hẳn — tránh đè lên nhau
         points = self._hex_points(center[0], center[1], radius)
         # Nhịp "thở": glow phồng nhẹ theo sin(time) → cảm giác neon sống động
@@ -878,6 +1347,21 @@ class RuneBuilderScreen:
             self.screen.blit(glyph_s, glyph_s.get_rect(center=center))
 
     def _hex_points(self, cx: int, cy: int, radius: int) -> list[tuple[int, int]]:
+        """Tính 6 đỉnh của 1 lục giác ĐỀU, đỉnh trên cùng lệch -30° (để lục
+        giác nằm "phẳng cạnh trên" thay vì "nhọn đỉnh trên") — dùng làm input
+        cho `pygame.draw.polygon` ở khắp nơi (crystal chọn hệ, huy hiệu rune,
+        khung board...).
+
+        Tham số:
+            cx, cy: tâm lục giác.
+            radius: bán kính (tâm → đỉnh).
+
+        Trả về: list 6 điểm (x, y) theo chiều kim đồng hồ.
+
+        Gọi bởi: `_draw_selector_crystal`, `_draw_rune_crest`,
+            `_render_board_surface` (hàm `hexp` lồng bên trong nó tự tính
+            tương tự, không gọi thẳng hàm này vì cần nhân hệ số supersample).
+        """
         return [
             (
                 int(cx + math.cos(math.radians(60 * i - 30)) * radius),
@@ -887,20 +1371,70 @@ class RuneBuilderScreen:
         ]
 
     def _lerp_point(self, a: tuple[int, int], b: tuple[int, int], t: float) -> tuple[int, int]:
+        """Nội suy tuyến tính (linear interpolation) giữa 2 điểm — điểm nằm
+        cách `a` một đoạn `t` phần của quãng đường tới `b`.
+
+        Tham số:
+            a, b: 2 điểm (x, y) đầu-cuối.
+            t: tỉ lệ nội suy, 0.0 = tại `a`, 1.0 = tại `b`, 0.5 = chính giữa.
+
+        Trả về: 1 điểm (x, y) (toạ độ nguyên).
+
+        Gọi bởi: `_hex_lattice_points`/`_hex_grid_intersections` (tính các
+            điểm chia đều trên cạnh lục giác để làm vị trí node) —
+            dùng RẤT NHIỀU lần khi dựng layout cây cho từng hệ.
+        """
         return (int(a[0] + (b[0] - a[0]) * t), int(a[1] + (b[1] - a[1]) * t))
 
     # ── Animation helpers ───────────────────────────────────────────────────────
 
     def _ease_out(self, t: float) -> float:
-        """Ease-out cubic: nhanh lúc đầu, chậm dần về cuối → cảm giác mượt."""
+        """Ease-out cubic: nhanh lúc đầu, chậm dần về cuối → cảm giác mượt
+        (thay vì tốc độ đều — trông "máy móc" hơn nhiều).
+
+        Tham số:
+            t: tiến trình animation thô, 0.0-1.0 (thời gian tuyến tính).
+
+        Trả về: tiến trình đã "uốn cong" theo easing, cũng trong khoảng 0.0-1.0.
+
+        Gọi bởi: `_layout_watcher_slots` (morph vị trí node),
+            `_draw_tree_links` (độ mờ lớp accent) — bất kỳ chỗ nào cần
+            animation mượt thay vì tuyến tính.
+        """
         t = max(0.0, min(1.0, t))
         return 1.0 - (1.0 - t) ** 3
 
     def _lerp_color(self, a: tuple, b: tuple, t: float) -> tuple:
+        """Nội suy tuyến tính giữa 2 màu RGB — dùng khi đổi hệ (element) để
+        màu chủ đạo chuyển dần thay vì đổi phựt 1 phát.
+
+        Tham số:
+            a, b: 2 màu (R, G, B) đầu-cuối.
+            t: tỉ lệ nội suy, 0.0 = màu `a`, 1.0 = màu `b`.
+
+        Trả về: 1 màu (R, G, B) đã nội suy.
+
+        Gọi bởi: `_layout_watcher_slots` (tính `self._anim_color` mỗi frame
+            trong lúc morph).
+        """
         return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
     def _draw_line_alpha(self, start, end, color, width: int, alpha_f: float) -> None:
-        """Vẽ line với độ mờ theo alpha_f (0-1); nhanh khi đã đục hoàn toàn."""
+        """Vẽ 1 đoạn thẳng với độ mờ tuỳ chỉnh (`pygame.draw.line` bình
+        thường KHÔNG hỗ trợ alpha trực tiếp trên surface không SRCALPHA, nên
+        phải vẽ lên 1 surface tạm trong suốt rồi mới blit đè lên). Nếu
+        `alpha_f` gần như đục hoàn toàn (>= 250/255) thì vẽ thẳng luôn cho
+        nhanh, khỏi tốn công tạo surface tạm.
+
+        Tham số:
+            start, end: 2 đầu đoạn thẳng.
+            color: màu đường (RGB).
+            width: độ dày nét (px).
+            alpha_f: độ mờ, 0.0 (trong suốt hoàn toàn) → 1.0 (đục hoàn toàn).
+
+        Ghi chú: hiện KHÔNG có nơi nào trong file gọi hàm này — có thể là
+            leftover từ 1 bản vẽ cây cũ đã bị thay bằng `_draw_tree_links`.
+        """
         a = int(max(0.0, min(1.0, alpha_f)) * 255)
         if a >= 250:
             pygame.draw.line(self.screen, color, start, end, width)
@@ -910,7 +1444,21 @@ class RuneBuilderScreen:
         self.screen.blit(surf, (0, 0))
 
     def _draw_arrow_head(self, start, end, color, size: int = 11, t: float = 0.6) -> None:
-        """Vẽ tam giác mũi tên hướng start→end, đặt ở ~t dọc đoạn."""
+        """Vẽ THẲNG (không qua bước tính điểm riêng) 1 tam giác mũi tên
+        hướng `start` → `end`, đặt ở vị trí `t` dọc đoạn — bản "làm luôn 1
+        bước" của cặp `_arrow_points` (tính điểm) + `pygame.draw.polygon`
+        (vẽ) mà `_draw_tree_links` đang dùng.
+
+        Tham số:
+            start, end: 2 đầu đoạn thẳng — mũi tên chỉ từ start → end.
+            color: màu mũi tên.
+            size: kích thước tam giác (px).
+            t: vị trí đặt mũi tên dọc đoạn, 0.0 = tại start, 1.0 = tại end.
+
+        Ghi chú: hiện KHÔNG có nơi nào trong file gọi hàm này (luồng
+            "Watcher" dùng `_arrow_points` + tự vẽ polygon thay vì hàm này)
+            — có thể là leftover từ 1 bản vẽ cây cũ.
+        """
         dx, dy = end[0] - start[0], end[1] - start[1]
         dist = math.hypot(dx, dy)
         if dist < 1:
@@ -925,7 +1473,20 @@ class RuneBuilderScreen:
         pygame.draw.polygon(self.screen, color, [tip, left, right])
 
     def _draw_energy_flow(self, a, b, color, idx: int) -> None:
-        """Chấm sáng chạy dọc edge active → hiệu ứng năng lượng chảy."""
+        """Vẽ 1 chấm sáng nhỏ chạy dọc theo đoạn nối `a`→`b`, lặp vô hạn theo
+        `self._time` — hiệu ứng "năng lượng chảy" dọc các đường nối ĐANG
+        ACTIVE trong cây (cả 2 đầu đều có rune), cho cảm giác cây đang "sống".
+
+        Tham số:
+            a, b: 2 đầu đoạn nối (toạ độ node cha/con).
+            color: màu chấm sáng + quầng glow quanh nó.
+            idx: chỉ số thứ tự cạnh (dùng để lệch pha `idx * 0.33` — các
+                cạnh khác nhau không chạy đồng bộ y hệt nhau, trông tự nhiên
+                hơn).
+
+        Gọi bởi: `_draw_watcher_tree` (1 lần cho mỗi cạnh đang active trong
+            `config["edges"]`).
+        """
         frac = (self._time * 0.55 + idx * 0.33) % 1.0
         x = int(a[0] + (b[0] - a[0]) * frac)
         y = int(a[1] + (b[1] - a[1]) * frac)
@@ -937,12 +1498,41 @@ class RuneBuilderScreen:
     # ── Icon sprite ─────────────────────────────────────────────────────────────
 
     def _element_icon(self, key):
-        """Sprite icon cho element key (delegate config, đã mask lục giác)."""
+        """Lấy sprite icon (đã mask hình lục giác sẵn) cho 1 hệ nguyên tố.
+        CHỈ đứng ra ủy quyền (delegate) cho `rune_ui_config.element_icon()` —
+        ảnh thật load/cache ở đó, file này không tự quản lý ảnh element.
+
+        Tham số:
+            key: chuỗi hệ ("fire"/"ice"/"lightning"/"wind").
+
+        Trả về: Surface icon, hoặc None nếu hệ không có ảnh riêng (fallback
+            vẽ glyph chữ — xem nơi gọi).
+
+        Gọi bởi: `_draw_selector_crystal`, `_draw_ability_panel`,
+            `_draw_watcher_slot` (mọi chỗ cần icon element).
+        """
         return cfg.element_icon(key)
 
     def _modifier_icon(self, rune):
-        """Icon vẽ tay riêng cho modifier đặc biệt. Trả None nếu rune không có
-        icon riêng → dùng glyph chữ mặc định."""
+        """Bộ "phân phát" (dispatcher) icon vẽ tay cho các Modifier/Trigger
+        ĐẶC BIỆT có icon riêng (isinstance từng loại, gọi tới đúng hàm
+        `_xxx_icon` tương ứng). Modifier KHÔNG có trong danh sách này (VD
+        HitAndRunModifier, TwistOfFateModifier...) trả về None → nơi gọi tự
+        fallback vẽ glyph chữ mặc định (xem `_rune_glyph`).
+
+        Tham số:
+            rune: đối tượng ModifierRune cần tìm icon.
+
+        Trả về: Surface icon (96×96, đã cache sẵn theo size — xem từng hàm
+            `_xxx_icon`), hoặc None nếu rune không thuộc danh sách đặc biệt.
+
+        Gọi tới: `_flash_swords_icon`, `_burst_icon`, `_boulder_icon`,
+            `_heavy_hitter_icon`, `_orbit_icon`, `_trail_icon`, `_frenetic_icon`,
+            `_storm_icon`, `_stars_aligned_icon`.
+        Gọi bởi: `_draw_storage_orb`, `_draw_watcher_slot`, `_draw_tree_drag_ghost`
+            (mọi chỗ cần vẽ icon cho 1 modifier — luôn thử icon riêng trước,
+            hết mới rơi về glyph chữ).
+        """
         from logic.rune.modifiers.furious_outburst_modifier import FuriousOutburstModifier
         from logic.rune.modifiers.rolling_stone_modifier import RollingStoneModifier
         from logic.rune.modifiers.heavy_hitter_modifier import HeavyHitterModifier
@@ -973,7 +1563,18 @@ class RuneBuilderScreen:
         return None
 
     def _flash_swords_icon(self, size: int) -> pygame.Surface:
-        """Icon 3 lưỡi kiếm quay quanh 1 tâm — Flash of Swords (tia kiếm orbit)."""
+        """Vẽ tay icon 3 lưỡi kiếm quay quanh 1 tâm — riêng cho Flash of
+        Swords (tia kiếm orbit quanh nguồn). Tự cache theo `(tên_icon, size)`
+        trong `self._icons` — chỉ vẽ thật 1 lần, các lần gọi sau lấy thẳng
+        từ cache (mọi hàm `_xxx_icon` trong nhóm này đều theo đúng khuôn này).
+
+        Tham số:
+            size: kích thước icon (px, hình vuông size×size).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là FlashOfSwordsTrigger).
+        """
         key = ('flash_swords_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1001,7 +1602,17 @@ class RuneBuilderScreen:
         return surf
 
     def _stars_aligned_icon(self, size: int) -> pygame.Surface:
-        """Icon 3 chấm sao thẳng hàng — dùng cho Stars Aligned (dàn hàng thẳng)."""
+        """Vẽ tay icon 3 chấm sao thẳng hàng — riêng cho Stars Aligned (rune
+        làm đạn dàn hàng thẳng). Cache theo `(tên_icon, size)`, xem
+        `_flash_swords_icon` để biết cơ chế cache dùng chung.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là StarsAlignedModifier).
+        """
         key = ('stars_aligned_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1019,7 +1630,17 @@ class RuneBuilderScreen:
         return surf
 
     def _frenetic_icon(self, size: int) -> pygame.Surface:
-        """Icon nan quạt 3 tia trong 1 cone — Frenetic Energy (Spawn Count + cone)."""
+        """Vẽ tay icon nan quạt 3 tia toả trong 1 cone — riêng cho Frenetic
+        Energy (rune Spawn Count + toả cone ngẫu nhiên). Cache theo
+        `(tên_icon, size)`, xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là FreneticEnergyModifier).
+        """
         key = ('frenetic_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1038,7 +1659,17 @@ class RuneBuilderScreen:
         return surf
 
     def _storm_icon(self, size: int) -> pygame.Surface:
-        """Icon lốc xoáy — vòng xoắn thu nhỏ dần, dùng cho Perfect Storm."""
+        """Vẽ tay icon lốc xoáy — nhiều cung tròn xoắn thu nhỏ dần vào tâm,
+        riêng cho Perfect Storm (rune tạo vùng lốc hút quái). Cache theo
+        `(tên_icon, size)`, xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là PerfectStormModifier).
+        """
         key = ('storm_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1058,7 +1689,17 @@ class RuneBuilderScreen:
         return surf
 
     def _trail_icon(self, size: int) -> pygame.Surface:
-        """Icon vệt lửa — 3 chấm lửa nhỏ dần chạy chéo (dấu vết để lại)."""
+        """Vẽ tay icon vệt lửa — 3 chấm lửa nhỏ dần chạy chéo (gợi hình dấu
+        vết để lại phía sau), riêng cho Destructive Path. Cache theo
+        `(tên_icon, size)`, xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là DestructivePathModifier).
+        """
         key = ('trail_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1073,7 +1714,17 @@ class RuneBuilderScreen:
         return surf
 
     def _boulder_icon(self, size: int) -> pygame.Surface:
-        """Icon tảng đá lăn — vòng tròn xám nâu có vài đường nứt."""
+        """Vẽ tay icon tảng đá — vòng tròn xám nâu điểm vài mảng bóng/nứt
+        cho có kết cấu đá, riêng cho Rolling Stone. Cache theo
+        `(tên_icon, size)`, xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là RollingStoneModifier).
+        """
         key = ('boulder_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1091,7 +1742,17 @@ class RuneBuilderScreen:
         return surf
 
     def _heavy_hitter_icon(self, size: int) -> pygame.Surface:
-        """Icon búa/đòn nặng — tam giác nhọn hướng xuống (dấu impact) + viền dày."""
+        """Vẽ tay icon "đòn nặng" — hình tam giác nhọn hướng xuống kiểu dấu
+        impact, viền dày, riêng cho Heavy Hitter. Cache theo `(tên_icon, size)`,
+        xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là HeavyHitterModifier).
+        """
         key = ('heavy_hitter_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1112,7 +1773,18 @@ class RuneBuilderScreen:
         return surf
 
     def _orbit_icon(self, size: int) -> pygame.Surface:
-        """Icon quỹ đạo — vòng tròn quanh 1 tâm + 1 vệ tinh nhỏ trên quỹ đạo."""
+        """Vẽ tay icon quỹ đạo — 1 tâm + đường ellipse quỹ đạo + 1 "vệ tinh"
+        nhỏ trên quỹ đạo, riêng cho Self-Centered (rune cho đạn quay quanh
+        tâm). Cache theo `(tên_icon, size)`, xem `_flash_swords_icon` để
+        biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là SelfCenteredModifier).
+        """
         key = ('orbit_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1131,7 +1803,17 @@ class RuneBuilderScreen:
         return surf
 
     def _burst_icon(self, size: int) -> pygame.Surface:
-        """Icon tia lửa 8 cánh (ngôi sao nhọn xen kẽ) — dùng cho rune Trigger."""
+        """Vẽ tay icon tia lửa 8 cánh (ngôi sao nhọn xen kẽ bán kính
+        ngoài/trong), riêng cho Furious Outburst. Cache theo `(tên_icon, size)`,
+        xem `_flash_swords_icon` để biết cơ chế cache.
+
+        Tham số:
+            size: kích thước icon (px).
+
+        Trả về: Surface icon đã vẽ (hoặc lấy từ cache).
+
+        Gọi bởi: `_modifier_icon` (khi rune là FuriousOutburstModifier).
+        """
         key = ('burst_icon', size)
         cached = self._icons.get(key)
         if cached is not None:
@@ -1151,10 +1833,42 @@ class RuneBuilderScreen:
         return surf
 
     def _rune_element_key(self, rune):
-        """Map rune → element key ('fire'/'ice'/...); Modifier/None trả None."""
+        """Map 1 rune ElementRune sang chuỗi hệ ('fire'/'ice'/'lightning'/
+        'wind') để tra icon/theme đúng hệ. CHỈ đứng ra ủy quyền cho
+        `rune_ui_config.rune_element_key()` (logic isinstance thật nằm ở đó,
+        dùng chung cho cả Builder lẫn Skill Select).
+
+        Tham số:
+            rune: đối tượng rune bất kỳ.
+
+        Trả về: chuỗi hệ nếu `rune` là ElementRune thuộc 1 trong 4 hệ; None
+            nếu là Modifier/Trigger hoặc None.
+
+        Gọi bởi: `_draw_watcher_slot`, `_draw_tree_drag_ghost` (cần biết
+            rune trong node là hệ nào để lấy đúng icon qua `_element_icon`).
+        """
         return cfg.rune_element_key(rune)
 
     def _hex_lattice_points(self, center: tuple[int, int], radius: int) -> dict:
+        """Dựng bộ điểm THAM CHIẾU dùng để đặt node cây rune lên lục giác:
+        6 đỉnh, các giao điểm lưới đặt tên sẵn (top_left, mid_center...), và
+        2 bộ điểm nội suy tiện dùng — "rays" (điểm dọc theo tia tâm→đỉnh, ở
+        32%/52%/72% quãng đường) và "chords" (điểm dọc theo dây cung nối 2
+        đỉnh, ở 35%/50%/65%). HÀM THUẦN TÍNH TOÁN HÌNH HỌC — không đọc gì từ
+        rune/element cả, chỉ biết lục giác.
+
+        Tham số:
+            center: (x, y) tâm lục giác.
+            radius: bán kính lục giác.
+
+        Trả về: dict gồm "center", "vertices" (6 đỉnh), "intersections"
+            (điểm lưới đặt tên), "grid_lines"/"major_grid_lines" (đường lưới
+            trang trí), "rays", "chords" (2 bộ điểm nội suy nói trên).
+
+        Gọi tới: `_hex_points`, `_hex_grid_intersections`, `_lerp_point`.
+        Gọi bởi: `_tree_config_for_element` (lấy bộ điểm THAM CHIẾU rồi từ
+            đó chọn ra vị trí THẬT cho từng slot node theo từng hệ).
+        """
         vertices = self._hex_points(center[0], center[1], radius)
         intersections, grid = self._hex_grid_intersections(center, radius)
         return {
@@ -1179,6 +1893,25 @@ class RuneBuilderScreen:
         }
 
     def _hex_grid_intersections(self, center: tuple[int, int], radius: int) -> tuple[dict, list]:
+        """Tính 10 điểm giao lưới ĐẶT TÊN sẵn bên trong lục giác (top_left,
+        top_center, top_right, mid_left, mid_center, mid_right, low_left,
+        low_center, low_right, bottom_center) theo hệ toạ độ lưới tam giác
+        đều (q, r) quy đổi sang pixel — cùng bộ đường lưới trang trí (nối
+        trung điểm các cạnh đối diện, chia 3 phần) hiện trong `_render_board_surface`/
+        `_grid_supersampled`. HÀM THUẦN TÍNH TOÁN HÌNH HỌC.
+
+        Tham số:
+            center: (x, y) tâm lục giác.
+            radius: bán kính lục giác.
+
+        Trả về: tuple (named, grid) — `named` là dict tên→điểm (dùng để đặt
+            node theo vị trí có ý nghĩa, dễ đọc hơn toạ độ thô); `grid` là
+            dict {"minor": [...], "major": [...]} danh sách đoạn thẳng lưới
+            trang trí.
+
+        Gọi tới: `_hex_points`, `_lerp_point`.
+        Gọi bởi: `_hex_lattice_points`.
+        """
         cx, cy = center
         row_step = radius / 4
         col_step = radius / 4
@@ -1224,9 +1957,37 @@ class RuneBuilderScreen:
         return named, {"minor": grid_lines, "major": major_lines}
 
     def _theme_for_element(self, key: str) -> dict:
+        """Lấy theme (màu chính/accent/muted, glyph chữ, tên hiển thị, mô tả
+        ngắn) của 1 hệ. CHỈ ủy quyền cho `rune_ui_config.theme()` — bảng màu
+        thật khai báo tập trung ở `ui/rune_ui_config.py` (ELEMENT_THEMES).
+
+        Tham số:
+            key: chuỗi hệ ("fire"/"ice"/"lightning"/"wind"/"basic").
+
+        Trả về: dict theme (xem cấu trúc ở `rune_ui_config.ELEMENT_THEMES`).
+
+        Gọi bởi: RẤT NHIỀU nơi cần màu/glyph theo hệ — `_draw_watcher_background`,
+            `_draw_top_spell_bar`, `_draw_selector_crystal`, `_layout_watcher_slots`,
+            `_draw_watcher_tree`, `_spell_theme_color`, `_spell_profile`...
+        """
         return cfg.theme(key)
 
     def _element_key(self, spell) -> str:
+        """Suy ra hệ (element) hiện tại của 1 chiêu — dựa vào ElementRune
+        đang gắn ở Slot 0 (lõi) trong cây rune của chiêu đó.
+
+        Tham số:
+            spell: 1 SpellBuild — hàm tự build cây rune tạm thời
+                (`spell.rune_slots.build_rune_tree()`) để đọc `tree.elements[0]`.
+
+        Trả về: "fire"/"ice"/"lightning"/"wind" nếu Slot 0 đã gắn element
+            tương ứng; "basic" nếu Slot 0 còn trống (chưa chọn hệ).
+
+        Gọi bởi: RẤT NHIỀU nơi cần biết chiêu đang thuộc hệ nào —
+            `_layout_watcher_slots`, `_draw_watcher_background`,
+            `_draw_top_spell_bar`, `_draw_ability_panel`, `_draw_watcher_tree`,
+            `_spell_theme_color`, `_spell_profile`.
+        """
         tree = spell.rune_slots.build_rune_tree()
         element = tree.elements[0] if tree.elements else None
         if element is None:
@@ -1246,6 +2007,31 @@ class RuneBuilderScreen:
         return "basic"
 
     def _tree_config_for_element(self, key: str, center: tuple[int, int], radius: int) -> dict:
+        """"Bộ não" layout cây — quyết định MỖI HỆ vẽ node ở đâu, nối cạnh
+        nào. Mỗi hệ (fire/ice/wind/lightning) khai báo layout riêng qua
+        `"grid": {slot_id: điểm_số}` (điểm_số tra trong `cfg.GRID_POINTS` —
+        17 điểm lưới lục giác đã đánh số sẵn), và `"edges"` (cặp id node nối
+        nhau, hướng con→cha, dùng để vẽ mũi tên). Điểm lưới KHÔNG được dùng
+        bởi hệ nào trở thành "node trang trí" (chấm mờ cho đẹp, không phải
+        slot thật). Sau khi build xong, có 2 bước hậu xử lý ÁP DỤNG CHO MỌI
+        HỆ: co cụm node lại gần tâm theo `cfg.NODE_REACH_SCALE` (đường nối
+        ngắn hơn), rồi gộp thêm vài field hình học chung (hex_points,
+        guide_edges, grid_lines...) để trả về 1 dict CONFIG ĐẦY ĐỦ.
+
+        Tham số:
+            key: chuỗi hệ ("fire"/"ice"/"lightning"/"wind"/"basic" — "basic"
+                dùng khi chưa chọn hệ, layout đối xứng đơn giản).
+            center, radius: tâm và bán kính board — TRUYỀN THẲNG từ
+                `cfg.BOARD_CENTER`/`cfg.BOARD_RADIUS` ở mọi nơi gọi.
+
+        Trả về: dict config đầy đủ — các hàm vẽ (`_draw_hex_board`,
+            `_draw_watcher_tree`, `_draw_tree_links`, `_layout_watcher_slots`)
+            đọc thẳng từ dict này, không tự tính lại hình học.
+
+        Gọi tới: `_hex_lattice_points`, `_lerp_point`.
+        Gọi bởi: `_layout_watcher_slots`, `_draw_watcher_tree` (2 nơi DUY
+            NHẤT dùng config này — 1 lần tính vị trí, 1 lần vẽ).
+        """
         lattice = self._hex_lattice_points(center, radius)
         v = lattice["vertices"]
         c = lattice["chords"]
@@ -1327,9 +2113,40 @@ class RuneBuilderScreen:
         }
 
     def _spell_theme_color(self, spell) -> tuple:
+        """Lấy nhanh màu chủ đạo (RGB) của 1 chiêu — gộp 2 bước
+        `_element_key` + `_theme_for_element` thành 1 lời gọi cho gọn.
+
+        Tham số:
+            spell: 1 SpellBuild.
+
+        Trả về: màu (R, G, B) của hệ hiện tại.
+
+        Gọi tới: `_element_key`, `_theme_for_element`.
+        Ghi chú: hiện KHÔNG có nơi nào trong file gọi hàm này (các chỗ cần
+            màu chiêu đều tự gọi 2 hàm con trực tiếp thay vì qua đây).
+        """
         return self._theme_for_element(self._element_key(spell))["color"]
 
     def _spell_profile(self, player, spell) -> dict:
+        """Gom TOÀN BỘ nội dung hiển thị của ability panel (tên/mô tả/màu/
+        glyph/stats/attributes) cho chiêu đang active thành 1 dict — tách
+        riêng khỏi việc VẼ để `_draw_ability_panel` chỉ lo layout, còn "số
+        liệu chiêu là gì" nằm hết ở đây. Tên/mô tả/attribute phụ thuộc
+        ElementRune đang gắn ở Slot 0 (chưa gắn → "BASIC SHOT" chung chung).
+
+        Tham số:
+            player: lấy `player.damage` (damage gốc) để cộng thêm
+                `element_bonus` (VD Lightning có BONUS_DAMAGE riêng theo stack).
+            spell: chiêu cần lấy hồ sơ — build cây rune tạm để đọc element/
+                modifier hiện có.
+
+        Trả về: dict với các khoá "name", "description", "color", "glyph",
+            "stats" (list 3-tuple label/value/color), "attributes" (list
+            2-tuple tiêu đề/nội dung).
+
+        Gọi tới: `_element_key`, `_theme_for_element`, `_spell_stats_for_element`.
+        Gọi bởi: `_draw_ability_panel`.
+        """
         tree = spell.rune_slots.build_rune_tree()
         element = tree.elements[0] if tree.elements else None
         key = self._element_key(spell)
@@ -1393,6 +2210,30 @@ class RuneBuilderScreen:
         modifier_count: int,
         element,
     ) -> list:
+        """Trả về danh sách stat hiển thị (Damage/Duration/Speed/...) khớp
+        ĐÚNG hệ đang chọn — mỗi hệ có bộ stat khác hẳn nhau (VD Fire có
+        "Apply Burn", Ice có khoảng damage charge min-max) nên KHÔNG dùng
+        chung 1 công thức, phải if/elif rẽ nhánh theo `key`. Con số ở đây
+        CHỈ ĐỂ HIỂN THỊ — không tự tính damage thật trong gameplay (số liệu
+        thật nằm trong `logic/rune/elements/*.py`, ở đây chỉ mô phỏng lại
+        cho khớp để người chơi xem trước).
+
+        Tham số:
+            key: chuỗi hệ ("fire"/"ice"/"lightning"/"wind"/"basic").
+            player: lấy `player.ultimate_cooldown` (nhánh "basic").
+            spell: lấy `spell.fire_rate` (nhánh "basic").
+            total_damage: damage đã cộng dồn bonus của element (tính sẵn ở
+                `_spell_profile`, truyền vào để khỏi tính lại).
+            modifier_count: số modifier đang gắn trong cây — hiện thẳng ra
+                dòng "Modifiers".
+            element: đối tượng ElementRune thật (dùng lấy hằng số riêng, VD
+                `element.BURN_DAMAGE` của Fire).
+
+        Trả về: list các tuple (label, value_str, color) — `_draw_ability_panel`
+            render trực tiếp từng dòng theo thứ tự này.
+
+        Gọi bởi: `_spell_profile`.
+        """
         theme = self._theme_for_element(key)
         if key == "wind":
             return [
@@ -1436,9 +2277,42 @@ class RuneBuilderScreen:
         ]
 
     def _shade_color(self, color: tuple[int, int, int], scale: float) -> tuple[int, int, int]:
+        """Làm sáng/tối 1 màu bằng cách nhân từng kênh R/G/B với `scale`, kẹp
+        lại trong [0, 255] — công cụ cơ bản để tạo các sắc độ đậm/nhạt của
+        CÙNG 1 màu hệ mà không cần khai báo thêm màu riêng (VD viền đậm hơn
+        nền, glow nhạt hơn lõi...).
+
+        Tham số:
+            color: màu gốc (R, G, B).
+            scale: hệ số nhân — < 1.0 làm tối, > 1.0 làm sáng, 1.0 giữ nguyên.
+
+        Trả về: màu (R, G, B) đã chỉnh.
+
+        Gọi bởi: RẤT NHIỀU hàm vẽ cần biến thể đậm/nhạt của 1 màu —
+            `_draw_selector_crystal`, `_render_board_surface`, `_grid_supersampled`,
+            `_draw_rune_crest`, `_draw_watcher_slot`, `_draw_tree_links`,
+            `_draw_point_budget_pips`...
+        """
         return tuple(max(0, min(255, int(part * scale))) for part in color)
 
     def _rune_ui_color(self, rune) -> tuple:
+        """Chọn màu đại diện cho 1 rune bất kỳ để vẽ UI (viền node, orb kho,
+        panel hover...). Element rune (Fire/Ice/Wind/Lightning) LUÔN dùng
+        đúng màu theme hệ tương ứng (nhất quán với board/crystal); Modifier/
+        Trigger thì hỏi thẳng `rune.get_color()` (mỗi rune tự khai báo màu
+        riêng — xem `RuneComponent.get_color()`).
+
+        Tham số:
+            rune: đối tượng rune bất kỳ, hoặc None (slot trống).
+
+        Trả về: màu (R, G, B); nếu `rune is None` trả về màu theme "basic"
+            (fallback trung tính).
+
+        Gọi tới: `_theme_for_element`.
+        Gọi bởi: `_draw_hover_info_panel`, `_draw_storage_orb`,
+            `_draw_watcher_slot`, `_draw_tree_drag_ghost` (mọi nơi cần tô
+            màu theo đúng rune đang cầm/hiển thị).
+        """
         if rune is None:
             return self._theme_for_element("basic")["color"]
         from logic.rune.elements.wind_rune import WindRune
@@ -1456,6 +2330,20 @@ class RuneBuilderScreen:
         return rune.get_color()
 
     def _rune_glyph(self, rune) -> str:
+        """Chọn 1 CHỮ CÁI đại diện cho rune, dùng khi rune KHÔNG có icon vẽ
+        tay riêng (`_element_icon`/`_modifier_icon` trả None) — so khớp từ
+        khoá trong tên hiển thị (VD tên chứa "fire" → glyph "F"); rune không
+        khớp từ khoá nào thì lấy luôn chữ cái đầu của tên.
+
+        Tham số:
+            rune: đối tượng rune bất kỳ — đọc `rune.get_display_name()`.
+
+        Trả về: 1 ký tự (chuỗi độ dài 1), viết hoa.
+
+        Gọi bởi: `_draw_selector_crystal` (gián tiếp qua `_theme_for_element`
+            cho element), `_draw_storage_orb`, `_draw_rune_crest` (qua tham
+            số `glyph` do nơi gọi tự truyền vào).
+        """
         name = rune.get_display_name().lower()
         if "lightning" in name:
             return "Z"
@@ -1478,6 +2366,24 @@ class RuneBuilderScreen:
         return rune.get_display_name()[:1].upper()
 
     def _wrap_text(self, text: str, font, max_w: int) -> list[str]:
+        """Bẻ 1 đoạn văn bản dài thành nhiều dòng ngắn, mỗi dòng vừa khít
+        `max_w` px khi render bằng `font` — pygame không tự word-wrap nên
+        phải tự đo độ rộng từng từ (`font.size()`) rồi ghép dần.
+
+        Tham số:
+            text: văn bản gốc — CÁC DẤU XUỐNG DÒNG `\\n` CÓ SẴN ĐƯỢC TÔN
+                TRỌNG (mô tả rune dạng thẻ có sẵn xuống dòng giữa dòng tóm
+                tắt và các dòng bullet ◆ — không được gộp chung lại rồi
+                wrap lại từ đầu, phải wrap RIÊNG từng đoạn giữa 2 dấu \\n).
+            font: font pygame dùng để đo độ rộng chữ.
+            max_w: độ rộng tối đa cho phép mỗi dòng (px).
+
+        Trả về: list các dòng đã bẻ, sẵn sàng render từng dòng 1 (dòng trống
+            "" được giữ lại nếu có 2 dấu \\n liên tiếp, không bị bỏ qua).
+
+        Gọi bởi: RẤT NHIỀU nơi cần hiện văn bản dài — `_draw_ability_panel`,
+            `_draw_hover_info_panel`, `_draw_keyword_cards`.
+        """
         # Tôn trọng xuống dòng \n có sẵn (mô tả rune dạng thẻ: 1 dòng tóm tắt +
         # các dòng bullet ◆ riêng) — mỗi đoạn tự wrap theo bề rộng.
         out: list[str] = []
@@ -1502,6 +2408,14 @@ class RuneBuilderScreen:
     # ── Header ────────────────────────────────────────────────────────────────
 
     def _draw_header(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ tiêu đề "RUNE
+        BUILDER" + số lượng rune trong kho, thuộc bản layout Mylistra cũ
+        (panel inventory bên trái). Layout "Watcher's Heart" hiện tại dùng
+        `_draw_top_spell_bar` thay thế.
+
+        Tham số:
+            player: lấy `len(player.rune_inventory)` để hiện số rune.
+        """
         title      = self.font_big.render("RUNE  BUILDER", True, (255, 210, 60))
         title_rect = title.get_rect(midtop=(SCREEN_W // 2, 8))
         self.screen.blit(title, title_rect)
@@ -1513,16 +2427,32 @@ class RuneBuilderScreen:
         self.screen.blit(count_txt, (INV_X, 70))
 
     def _draw_instructions(self) -> None:
+        """Vẽ 1 dòng hint phím tắt (click chuột trái/phải, ESC/Tab) cố định
+        ở đáy màn hình. Không có tham số ngoài `self`, không đọc state gì.
+
+        Gọi bởi: `draw()` (luôn vẽ, mọi frame).
+        """
         hint = self.font_small.render("L-Click: chon/gan rune  |  R-Click: go ve kho  |  ESC / Tab: dong", True, (100, 160, 160))
         self.screen.blit(hint, hint.get_rect(midbottom=(910, SCREEN_H - 14)))
 
     def _draw_status(self) -> None:
+        """Vẽ thông báo tạm thời (VD lý do không đặt được rune) — nội dung
+        lấy từ `self.status_msg`, do `_show_status()` set kèm hẹn giờ tắt.
+
+        Gọi bởi: `draw()` (chỉ khi `self.status_timer > 0` — còn hạn hiển thị).
+        """
         surf = self.font_small.render(self.status_msg, True, (255, 100, 100))
         self.screen.blit(surf, surf.get_rect(center=(274, 96)))
 
     # ── Left Tab Buttons ──────────────────────────────────────────────────────
 
     def _draw_left_tabs(self) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ 2 nút tab
+        "Inventory"/"Stats" bên trái, thuộc bản layout Mylistra cũ (chuyển
+        đổi giữa `_draw_inventory_panel` và `_draw_stats_panel` qua
+        `self.left_tab`). Layout hiện tại không còn khái niệm tab trái nữa
+        (mọi thứ luôn hiện cùng lúc: ability panel + kho modifier).
+        """
         tabs = [(TAB_INV, "Inventory"), (TAB_STATS, "Stats")]
         for i, (tab_id, label) in enumerate(tabs):
             x      = INV_X + i * (TAB_BTN_W + 8)
@@ -1540,6 +2470,16 @@ class RuneBuilderScreen:
     # ── Stats Panel ───────────────────────────────────────────────────────────
 
     def _draw_stats_panel(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ panel chỉ số
+        nhân vật đầy đủ (HP/Speed/Damage/Armor/Regen/Luck/Crit/XP Range/Ult
+        Cooldown) + danh sách rune đang gắn ở chiêu active, thuộc bản layout
+        Mylistra cũ (tab "Stats" bên trái). Layout hiện tại KHÔNG có panel
+        tương đương — ability panel (`_draw_ability_panel`) chỉ hiện stat
+        của CHIÊU, không hiện stat NHÂN VẬT tổng.
+
+        Tham số:
+            player: nguồn toàn bộ số liệu hiển thị.
+        """
         panel = pygame.Surface((INV_PANEL_W, SCREEN_H), pygame.SRCALPHA)
         panel.fill((18, 18, 30, 220))
         self.screen.blit(panel, (0, 0))
@@ -1591,6 +2531,15 @@ class RuneBuilderScreen:
     # ── Inventory Panel ───────────────────────────────────────────────────────
 
     def _draw_inventory_panel(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ danh sách rune
+        trong kho dạng list dọc đầy đủ (tên + loại + màu, không giới hạn 5
+        như thanh orb hiện tại), thuộc bản layout Mylistra cũ. Layout hiện
+        tại dùng `_draw_modifier_storage` (thanh orb ngang, giới hạn 5 slot,
+        chỉ chứa Modifier chứ không phải MỌI rune như hàm này).
+
+        Tham số:
+            player: đọc `player.rune_inventory` (MỌI rune, không lọc loại).
+        """
         # Nền panel
         panel = pygame.Surface((INV_PANEL_W, SCREEN_H), pygame.SRCALPHA)
         panel.fill((18, 18, 30, 220))
@@ -1644,10 +2593,24 @@ class RuneBuilderScreen:
                 break
 
     def _draw_divider(self) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ 1 đường kẻ dọc
+        ngăn cách panel inventory (trái) với canvas cây rune (phải), thuộc
+        bản layout Mylistra cũ. Layout hiện tại không còn panel trái cố định
+        nên không cần đường ngăn cách nữa.
+        """
         pygame.draw.line(self.screen, COL_DIVIDER,
                          (INV_PANEL_W + 5, 60), (INV_PANEL_W + 5, SCREEN_H - 10), 1)
 
     def _draw_spell_buttons(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ nút chữ nhật
+        chọn chiêu (tên chiêu trong khung bo góc), thuộc bản layout Mylistra
+        cũ. Layout hiện tại dùng `_draw_selector_crystal` (crystal lục giác
+        có icon hệ) thay thế — cũng do `_draw_top_spell_bar` gọi.
+
+        Tham số:
+            player: `player.spells` (số nút) và `player.active_spell_index`
+                (nút nào đang sáng).
+        """
         total_w = len(player.spells) * SPELL_BTN_W + (len(player.spells) - 1) * 12
         start_x = (INV_PANEL_W + SCREEN_W) // 2 - total_w // 2
         for i, spell in enumerate(player.spells):
@@ -1668,6 +2631,17 @@ class RuneBuilderScreen:
     # ── Tree Canvas ───────────────────────────────────────────────────────────
 
     def _draw_tree_canvas(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ cây rune kiểu
+        CŨ: đường nối thẳng đơn giản (không đôi/không mũi tên) + node tròn
+        đơn giản (không phải huy hiệu lục giác), thuộc bản layout Mylistra.
+        Layout hiện tại dùng `_draw_watcher_tree` (board lục giác + link đôi
+        + huy hiệu rune) thay thế hoàn toàn.
+
+        Tham số:
+            player: lấy chiêu đang active để vẽ cây của nó.
+
+        Gọi tới (nội bộ, cũng đều là code chết): `_draw_slot`, `_draw_combo_hint`.
+        """
         active_spell = player.get_active_spell()
         rune_slots = active_spell.rune_slots
 
@@ -1698,7 +2672,18 @@ class RuneBuilderScreen:
         self._draw_combo_hint(player)
 
     def _draw_dashed_line(self, start, end, color, width=1, dash=8, gap=5):
-        """Vẽ đường nét đứt giữa 2 điểm."""
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Vẽ đường nét đứt giữa
+        2 điểm — bản CŨ của `_dashed_line_surf` (làm việc tương tự nhưng vẽ
+        thẳng lên `self.screen` thay vì lên 1 surface truyền vào). Layout
+        hiện tại dùng `_dashed_line_surf` (qua `_draw_tree_links`).
+
+        Tham số:
+            start, end: 2 đầu đoạn thẳng.
+            color: màu nét đứt.
+            width: độ dày nét (px).
+            dash: độ dài mỗi đoạn nét (px).
+            gap: độ dài mỗi khoảng hở (px).
+        """
         import math
         dx = end[0] - start[0]
         dy = end[1] - start[1]
@@ -1715,6 +2700,19 @@ class RuneBuilderScreen:
             pygame.draw.line(self.screen, color, p0, p1, width)
 
     def _draw_slot(self, slot, rune_slots, extra_label: str = None) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng vẽ 1 slot node
+        kiểu CŨ: node tròn đơn giản, chữ viết tắt 2 ký tự đầu tên rune ở
+        giữa (không phải icon/glyph), "stack" hiện dạng "x2" góc trên-phải.
+        Thuộc bản layout Mylistra. Layout hiện tại dùng `_draw_watcher_slot`
+        (icon/glyph qua `_draw_rune_crest`, ngân sách điểm qua
+        `_draw_point_budget_pips` thay vì hiện stack thô).
+
+        Tham số:
+            slot: 1 RuneSlot cần vẽ.
+            rune_slots: toàn bộ RuneSlots của chiêu — hỏi `is_active()`/`can_place()`.
+            extra_label: nhãn phụ tuỳ chọn (VD "Main"/"L1"/"R1"...) hiện
+                thêm cạnh node.
+        """
         x, y = slot.x, slot.y
         active = rune_slots.is_active(slot.id)
 
@@ -1828,6 +2826,15 @@ class RuneBuilderScreen:
                 self.screen.blit(warn, warn.get_rect(center=(x, y + NODE_R + 32)))
 
     def _draw_combo_hint(self, player) -> None:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng hiện 1 dòng debug
+        mô tả tổ hợp rune hiện tại (VD "Current combo: [Fire] ->HeavyHitter")
+        ở đáy canvas, thuộc bản layout Mylistra. Layout hiện tại không có
+        gợi ý tương đương — thông tin combo giờ xem qua hover từng rune
+        (`_draw_hover_info_panel`).
+
+        Tham số:
+            player: lấy chiêu đang active để build cây rồi gọi `tree.describe()`.
+        """
         tree  = player.get_active_spell().rune_slots.build_rune_tree()
         desc  = tree.describe()
         surf  = self.font_small.render(f"Current combo:  {desc}", True, (180, 200, 180))
@@ -1838,7 +2845,28 @@ class RuneBuilderScreen:
     # ── Event Handling ────────────────────────────────────────────────────────
 
     def handle_event(self, event: pygame.event.Event, player) -> bool:
-        """Trả về True nếu cần đóng Builder và rebuild tree."""
+        """Điểm vào (entry point) xử lý MỌI input chuột/phím của Builder —
+        GameLoop gọi hàm này cho từng pygame event khi đang ở
+        STATE_RUNE_BUILDER, tương tự cách `draw()` là entry point vẽ. Tự
+        điều phối cho đúng handler con theo loại event + thứ tự ưu tiên khi
+        nhiều thứ cùng nằm dưới con trỏ (thanh cuộn kho > nút chọn chiêu >
+        orb trong kho > node trong cây).
+
+        Tham số:
+            event: 1 pygame event (KEYDOWN/MOUSEWHEEL/MOUSEBUTTONDOWN/
+                MOUSEBUTTONUP/MOUSEMOTION — các loại khác bị bỏ qua).
+            player: truyền tiếp cho mọi handler con cần thao tác lên state
+                nhân vật (đặt/gỡ/swap rune, đổi chiêu active...).
+
+        Trả về: True nếu người chơi vừa đóng Builder (ESC/Tab/Enter) — báo
+            cho GameLoop biết cần rebuild lại rune_tree và chuyển state;
+            False cho MỌI trường hợp khác (kể cả khi đã xử lý xong 1 click
+            bình thường).
+
+        Gọi tới: `_close`, `_resolve_tree_drag`, `_scroll_to_mouse`,
+            `_handle_spell_button_click`, `_handle_inventory_click`,
+            `_slot_at`, `_handle_slot_click`, `_handle_slot_remove`.
+        """
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_ESCAPE, pygame.K_TAB, pygame.K_RETURN):
                 self._close(player)
@@ -1913,6 +2941,17 @@ class RuneBuilderScreen:
           slot đã có rune thì ĐỔI CHỖ cho nhau (swap 2 node). Thả ra ngoài /
           vào chính node cũ / vào node khoá / không hợp lệ → huỷ, trả nguyên
           rune về đúng chỗ ban đầu, không đổi gì.
+
+        Tham số:
+            mx, my: vị trí chuột lúc thả (nơi thả rune).
+            player: lấy chiêu đang active để thao tác lên `rune_slots` của
+                nó (đặt/gỡ/swap).
+
+        Gọi tới: `_handle_slot_click` (fallback nếu hoá ra chỉ là click, không
+            phải kéo thật), `_slot_at`, `_reject_reason`, `_show_status`.
+        Gọi bởi: `handle_event` (khi MOUSEBUTTONUP và đang có
+            `tree_drag_slot_id` — tức là chuột đã bấm xuống 1 node có rune
+            trước đó).
         """
         rune_slots   = player.get_active_spell().rune_slots
         origin_id    = self.tree_drag_slot_id
@@ -1948,14 +2987,40 @@ class RuneBuilderScreen:
         self._show_status(self._reject_reason(rune_slots, moving_rune))
 
     def _slot_at(self, rune_slots, mx: int, my: int):
-        """Slot dưới con trỏ chuột (theo bán kính node), None nếu không trúng."""
+        """Tìm slot node dưới con trỏ chuột — kiểm tra khoảng cách chuột-tâm
+        so với `rune_slots.NODE_RADIUS` cho TỪNG slot (hitbox tròn, không
+        phải hình chữ nhật).
+
+        Tham số:
+            rune_slots: cây rune của chiêu đang active — duyệt qua
+                `rune_slots.slots`.
+            mx, my: vị trí chuột.
+
+        Trả về: 1 RuneSlot nếu chuột đang trong bán kính 1 node nào đó, None
+            nếu không trúng slot nào.
+
+        Gọi bởi: `handle_event` (bắt đầu kéo node), `_resolve_tree_drag`
+            (tìm slot đích khi thả), `_handle_slot_remove` (RMB gỡ rune).
+        """
         for s in rune_slots.slots:
             if math.hypot(mx - s.x, my - s.y) <= rune_slots.NODE_RADIUS:
                 return s
         return None
 
     def _handle_slot_remove(self, mx: int, my: int, player) -> None:
-        """Gỡ rune ở node (không phải lõi khóa) trả về kho."""
+        """Gỡ rune ở node dưới con trỏ chuột (nếu có) trả thẳng về kho —
+        LUÔN được phép, kể cả khi đang cầm sẵn 1 rune khác từ kho (khác với
+        click trái, RMB không quan tâm `selected_rune`). Node lõi đã khoá
+        (`slot.locked`) hoặc node trống thì không làm gì.
+
+        Tham số:
+            mx, my: vị trí chuột (nút phải vừa bấm).
+            player: lấy chiêu đang active + `player.rune_inventory` để nhận
+                lại rune vừa gỡ.
+
+        Gọi tới: `_slot_at`.
+        Gọi bởi: `handle_event` (MOUSEBUTTONDOWN nút phải, `event.button == 3`).
+        """
         rune_slots = player.get_active_spell().rune_slots
         s = self._slot_at(rune_slots, mx, my)
         if s is None or s.locked or s.is_empty():
@@ -1965,6 +3030,16 @@ class RuneBuilderScreen:
             player.rune_inventory.append(rune)
 
     def _handle_tab_click(self, mx: int, my: int) -> bool:
+        """[CODE CHẾT — không có nơi nào gọi hàm này] Từng xử lý click vào 2
+        nút tab "Inventory"/"Stats" bên trái (đổi `self.left_tab`), thuộc bản
+        layout Mylistra cũ — cặp đôi với `_draw_left_tabs` (cũng đã chết).
+        Layout hiện tại không còn khái niệm tab trái.
+
+        Tham số:
+            mx, my: vị trí chuột vừa click.
+
+        Trả về: True nếu click trúng 1 nút tab (và đã đổi tab), False nếu không.
+        """
         tabs = [(TAB_INV, "Inventory"), (TAB_STATS, "Stats")]
         for i, (tab_id, _) in enumerate(tabs):
             x = INV_X + i * (TAB_BTN_W + 8)
@@ -1975,6 +3050,25 @@ class RuneBuilderScreen:
         return False
 
     def _handle_inventory_click(self, mx: int, my: int, player) -> None:
+        """Xử lý click vào 1 orb trong thanh kho modifier — click orb đang
+        chọn thì BỎ CHỌN, click orb khác thì CHỌN orb đó (đổi rune đang chọn
+        sang orb mới, không cần bỏ chọn orb cũ trước).
+
+        Tham số:
+            mx, my: vị trí chuột vừa click.
+            player: lấy `player.rune_inventory` để tra rune theo index.
+
+        Gọi bởi: `handle_event` (khi click trúng 1 rect trong
+            `self.inventory_rects`).
+
+        Ghi chú: hàm có 2 nhánh — nhánh ĐẦU (dò trong `self.inventory_rects`,
+            do `_draw_modifier_storage` set mỗi frame) là đường THẬT đang
+            chạy. Nhánh SAU (dò theo lưới toạ độ `INV_Y_START`/`INV_ITEM_H`
+            cũ) là leftover từ layout Mylistra — chỉ chạy tới khi
+            `inventory_rects` rỗng (kho không có modifier nào), và vì layout
+            đó không còn hiển thị trên màn hình nữa nên trong thực tế
+            KHÔNG BAO GIỜ khớp toạ độ chuột thật — coi như vô hại nhưng thừa.
+        """
         inventory = player.rune_inventory
         if self.inventory_rects:
             for rect, idx in self.inventory_rects:
@@ -2003,6 +3097,26 @@ class RuneBuilderScreen:
                 return
 
     def _handle_spell_button_click(self, mx: int, my: int, player) -> bool:
+        """Xử lý click vào 1 crystal chọn chiêu ở hàng trên cùng — đổi chiêu
+        active, rebuild lại rune_tree của MỌI chiêu (đảm bảo số liệu đồng bộ
+        trước khi hiển thị chiêu mới), và bỏ chọn rune đang cầm (tránh mang
+        rune từ chiêu cũ "dính" sang chiêu mới không liên quan).
+
+        Tham số:
+            mx, my: vị trí chuột vừa click.
+            player: gọi `player.rebuild_all_spells()` + `player.set_active_spell(i)`.
+
+        Trả về: True nếu click trúng 1 crystal (đã đổi chiêu), False nếu không.
+
+        Gọi bởi: `handle_event` (kiểm tra sớm nhất trong chuỗi ưu tiên xử lý
+            click, trước cả kho và cây).
+
+        Ghi chú: hàm có 2 nhánh giống `_handle_inventory_click` — nhánh ĐẦU
+            (dò `self.spell_button_rects`, do `_draw_top_spell_bar` set) là
+            đường THẬT đang chạy; nhánh SAU (dò theo toạ độ `SPELL_BTN_Y`/
+            `SPELL_BTN_W` cũ) là leftover từ layout Mylistra, trong thực tế
+            không khớp toạ độ chuột thật vì layout đó không còn hiển thị.
+        """
         if self.spell_button_rects:
             for i, rect in enumerate(self.spell_button_rects):
                 if rect.collidepoint(mx, my):
@@ -2030,6 +3144,25 @@ class RuneBuilderScreen:
         return False
 
     def _handle_slot_click(self, mx: int, my: int, player) -> None:
+        """Xử lý click trái vào 1 node trong cây — 4 trường hợp tuỳ trạng
+        thái: node khoá → không làm gì; node TRỐNG + đang cầm rune → đặt
+        vào (thất bại thì hiện lý do qua `_reject_reason`); node CÓ RUNE +
+        đang cầm rune khác → swap (thất bại thì cũng hiện lý do, rune đang
+        cầm KHÔNG bị mất); node có rune + tay KHÔNG cầm gì → gỡ rune đó về
+        kho. Đây là hành vi FALLBACK khi click không đủ xa để tính là kéo
+        (xem `_resolve_tree_drag` gọi lại hàm này).
+
+        Tham số:
+            mx, my: vị trí chuột vừa click.
+            player: lấy chiêu đang active + `player.rune_inventory` để lấy/trả
+                rune.
+
+        Gọi tới: `_reject_reason`, `_show_status` (tự dò slot bằng vòng lặp
+            riêng, KHÔNG gọi `_slot_at` dù logic tương tự).
+        Gọi bởi: `handle_event` (click trái vào vùng canvas cây, tay
+            KHÔNG bắt đầu kéo node), `_resolve_tree_drag` (khi hoá ra chỉ
+            là click đứng yên, không phải kéo thật).
+        """
         rune_slots = player.get_active_spell().rune_slots
 
         for s in rune_slots.slots:
@@ -2070,7 +3203,23 @@ class RuneBuilderScreen:
             return
 
     def _reject_reason(self, rune_slots, rune) -> str:
-        """Giải thích vì sao không đặt/swap được `rune` vào chiêu hiện tại."""
+        """Giải thích vì sao không đặt/swap được `rune` vào chiêu hiện tại —
+        chỉ gọi SAU KHI `can_place()`/`swap()` đã thất bại, tự đoán lại lý do
+        cụ thể (không hợp hệ hay hết ngân sách điểm) để hiện thông báo hữu
+        ích thay vì chỉ "không đặt được".
+
+        Tham số:
+            rune_slots: cây rune của chiêu hiện tại — hỏi `used_points()`/
+                `MAX_POINTS`, và rune ở Slot 0 để kiểm tra `accepts_modifier()`.
+            rune: rune vừa bị từ chối.
+
+        Trả về: 1 chuỗi thông báo tiếng Việt-không-dấu (font game không có
+            glyph tiếng Việt có dấu) mô tả lý do.
+
+        Gọi bởi: `_handle_slot_click`, `_resolve_tree_drag` (mọi nơi vừa gọi
+            `can_place()`/`place()`/`swap()` thất bại và cần giải thích cho
+            người chơi).
+        """
         from logic.rune.rune_component import ModifierRune
         if isinstance(rune, ModifierRune):
             slot0_rune = rune_slots.get(0).rune
@@ -2083,11 +3232,33 @@ class RuneBuilderScreen:
         return "Rune nay khong hop voi he cua chieu!"
 
     def _show_status(self, msg: str, duration: float = 2.0) -> None:
+        """Đặt lịch hiện 1 thông báo tạm thời — `_draw_status()` sẽ vẽ nó ra
+        màn hình trong `duration` giây tiếp theo, `draw()` tự đếm ngược
+        `status_timer` mỗi frame rồi tắt khi hết hạn.
+
+        Tham số:
+            msg: nội dung thông báo.
+            duration: số giây hiển thị trước khi tự ẩn.
+
+        Gọi bởi: `_handle_slot_click`, `_resolve_tree_drag` (báo lý do đặt/
+            swap rune thất bại — luôn truyền qua `_reject_reason` trước).
+        """
         self.status_msg   = msg
         self.status_timer = duration
 
     def _close(self, player) -> None:
-        """Rebuild tree và reset selection khi đóng."""
+        """Dọn dẹp + đóng Builder — gọi khi người chơi bấm ESC/Tab/Enter.
+        Rebuild lại rune_tree của MỌI chiêu (đảm bảo mọi thay đổi vừa làm
+        trong Builder — đặt/gỡ/swap rune — được áp dụng thật vào gameplay,
+        vì cây rune "sống" chỉ build lại khi cần chứ không tự động theo mỗi
+        thao tác) và reset trạng thái chọn/thông báo về mặc định để lần mở
+        Builder SAU không bị dính state cũ.
+
+        Tham số:
+            player: gọi `player.rebuild_all_spells()`.
+
+        Gọi bởi: `handle_event` (khi nhận KEYDOWN ESC/Tab/Enter).
+        """
         player.rebuild_all_spells()
         self.selected_rune    = None
         self.selected_inv_idx = -1
